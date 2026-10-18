@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="/assets/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app/app.css">
+<title>Anvaya — Sign in</title>
+</head>
+<body>
+<div class="grid-bg"></div>
+<main class="auth-wrap">
+  <div class="card card-gold auth-card reveal">
+    <a href="/" class="brand"><img src="/assets/logo.png" alt=""><span class="brand-text"><span class="brand-name">Anvaya</span><span class="brand-tag">Where Purpose Meets Path</span></span></a>
+    <div class="eyebrow" id="eyebrow">Sign in</div>
+    <h1 class="title" id="heading">Welcome <em>back</em></h1>
+    <p class="sub mb-3" id="lede">Sign in to continue.</p>
+    <form id="loginForm" novalidate>
+      <div class="form-error" hidden></div>
+      <div class="field">
+        <label class="label" for="email">Email</label>
+        <input class="input" id="email" name="email" type="email" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label class="label" for="password">Password</label>
+        <input class="input" id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn-primary btn-block mt-1" type="submit">Sign in &rarr;</button>
+    </form>
+    <p class="auth-foot" id="foot"></p>
+  </div>
+</main>
+<script src="/app/core.js"></script>
+<script src="/app/login.js"></script>
+</body>
+</html>

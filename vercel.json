@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/admin", "destination": "/api/index" },
+    { "source": "/admin/(.*)", "destination": "/api/index" },
+    { "source": "/mentor", "destination": "/api/index" },
+    { "source": "/mentor/(.*)", "destination": "/api/index" },
+    { "source": "/invite", "destination": "/api/index" }
+  ],
+  "functions": { "api/index.js": { "includeFiles": "src/**", "maxDuration": 30 } }
+}

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="/assets/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app/app.css">
+<title>Anvaya — Admin dashboard</title>
+</head>
+<body>
+<div class="grid-bg"></div>
+<header class="topbar"><a href="/" class="brand"><img src="/assets/logo.png" alt=""><span class="brand-text"><span class="brand-name">Anvaya</span><span class="brand-tag">Where Purpose Meets Path</span></span></a><button class="menu-btn" aria-label="Menu">&#9776;</button></header>
+<div class="shell">
+  <aside class="side">
+    <a href="/" class="brand"><img src="/assets/logo.png" alt=""><span class="brand-text"><span class="brand-name">Anvaya</span><span class="brand-tag">Where Purpose Meets Path</span></span></a>
+    <div class="side-label">CRM</div>
+    <nav><ul class="nav">
+        <li><button data-tab="overview">Overview</button></li>
+        <li><button data-tab="leads">Leads <span class="count" id="c-leads" hidden></span></button></li>
+        <li><button data-tab="students">Students</button></li>
+        <li><button data-tab="mentors">Mentors <span class="count" id="c-mentors" hidden></span></button></li>
+        <li><button data-tab="bookings">Bookings</button></li>
+        <li><button data-tab="payments">Payments</button></li>
+        <li><button data-tab="account">Account</button></li>
+    </ul></nav>
+    <div class="side-foot">
+      <div class="who" id="who"></div>
+      <div class="who-role">Admin</div>
+      <button class="btn btn-ghost btn-sm btn-block" data-logout>Sign out</button>
+    </div>
+  </aside>
+  <main class="main" id="main"><p class="sub">Loading…</p></main>
+</div>
+<script src="/app/core.js"></script>
+
+<script src="/app/availability.js"></script>
+<script src="/app/admin.js"></script>
+</body>
+</html>

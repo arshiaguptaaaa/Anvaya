@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="/assets/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app/app.css">
+<title>Anvaya — Complete your mentor profile</title>
+</head>
+<body>
+<div class="grid-bg"></div>
+<main class="auth-wrap">
+  <div class="card card-gold auth-card wide reveal">
+    <div class="row-between mb-2"><a href="/" class="brand"><img src="/assets/logo.png" alt=""><span class="brand-text"><span class="brand-name">Anvaya</span><span class="brand-tag">Where Purpose Meets Path</span></span></a><button class="link-btn" data-logout>Sign out</button></div>
+    <div class="steps">
+      <div class="step done">1 &middot; Accept invitation</div>
+      <div class="step done">2 &middot; Create password</div>
+      <div class="step on">3 &middot; Profile &amp; availability</div>
+    </div>
+    <div class="eyebrow">Final step</div>
+    <h1 class="title">Complete your <em>mentor profile</em></h1>
+    <p class="sub mb-4">This is what students and the Anvaya team see. Once you save, your account becomes active and your dashboard opens.</p>
+    <form id="onbForm" novalidate>
+      <div class="form-error" hidden></div>
+      <div class="section-label">Profile</div>
+      <div class="form-grid">
+        <div class="field"><label class="label" for="name">Full name</label><input class="input" id="name" name="name" required></div>
+        <div class="field"><label class="label" for="phone">Phone (WhatsApp)</label><input class="input" id="phone" name="phone" placeholder="+91 98765 43210"></div>
+        <div class="field span-2"><label class="label" for="expertise">Expertise</label><input class="input" id="expertise" name="expertise" placeholder="e.g. Product management, MBA admissions, Consulting" required></div>
+        <div class="field span-2"><label class="label" for="bio">Bio</label><textarea class="input" id="bio" name="bio" rows="4" placeholder="Your background and how you help mentees" required></textarea></div>
+        <div class="field span-2"><label class="label" for="linkedin">LinkedIn URL</label><input class="input" id="linkedin" name="linkedin" placeholder="https://www.linkedin.com/in/…"></div>
+      </div>
+      <div class="section-label mt-1">Session details</div>
+      <div class="form-grid">
+        <div class="field"><label class="label" for="session_duration">Session length (minutes)</label><input class="input" id="session_duration" name="session_duration" type="number" min="15" max="240" step="5"></div>
+        <div class="field"><label class="label">Session price (set by Anvaya)</label><input class="input" id="session_price" disabled></div>
+        <div class="field span-2"><label class="label" for="meeting_link">Default meeting link</label><input class="input" id="meeting_link" name="meeting_link" placeholder="https://meet.google.com/…"></div>
+        <div class="field span-2"><label class="label" for="session_details">What a session with you covers</label><textarea class="input" id="session_details" name="session_details" rows="3"></textarea></div>
+      </div>
+      <div class="section-label mt-1">Weekly availability</div>
+      <div class="field"><label class="label" for="timezone">Time zone</label><input class="input" id="timezone" name="timezone" value="Asia/Kolkata"></div>
+      <div class="slots" id="slots"></div>
+      <button type="button" class="btn btn-ghost btn-sm mb-4" id="addSlot">+ Add a time slot</button>
+      <button class="btn btn-primary btn-block" type="submit">Save &amp; open my dashboard &rarr;</button>
+    </form>
+  </div>
+</main>
+<script src="/app/core.js"></script>
+<script src="/app/availability.js"></script>
+<script src="/app/onboarding.js"></script>
+</body>
+</html>

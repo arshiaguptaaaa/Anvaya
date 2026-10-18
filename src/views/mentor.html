@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="/assets/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app/app.css">
+<title>Anvaya — Mentor dashboard</title>
+</head>
+<body>
+<div class="grid-bg"></div>
+<header class="topbar"><a href="/" class="brand"><img src="/assets/logo.png" alt=""><span class="brand-text"><span class="brand-name">Anvaya</span><span class="brand-tag">Where Purpose Meets Path</span></span></a><button class="menu-btn" aria-label="Menu">&#9776;</button></header>
+<div class="shell">
+  <aside class="side">
+    <a href="/" class="brand"><img src="/assets/logo.png" alt=""><span class="brand-text"><span class="brand-name">Anvaya</span><span class="brand-tag">Where Purpose Meets Path</span></span></a>
+    <div class="side-label">Mentor</div>
+    <nav><ul class="nav">
+        <li><button data-tab="overview">Overview</button></li>
+        <li><button data-tab="sessions">Sessions</button></li>
+        <li><button data-tab="students">My students</button></li>
+        <li><button data-tab="earnings">Earnings</button></li>
+        <li><button data-tab="availability">Availability</button></li>
+        <li><button data-tab="profile">Profile</button></li>
+    </ul></nav>
+    <div class="side-foot">
+      <div class="who" id="who"></div>
+      <div class="who-role">Mentor</div>
+      <button class="btn btn-ghost btn-sm btn-block" data-logout>Sign out</button>
+    </div>
+  </aside>
+  <main class="main" id="main"><p class="sub">Loading…</p></main>
+</div>
+<script src="/app/core.js"></script>
+<script src="/app/availability.js"></script>
+<script src="/app/mentor.js"></script>
+</body>
+</html>
