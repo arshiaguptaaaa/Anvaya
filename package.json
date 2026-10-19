@@ -13,7 +13,9 @@
     "db:migrate": "node scripts/db-migrate.js",
     "db:import-sqlite": "node scripts/migrate-sqlite-to-postgres.js",
     "create-admin": "node src/create-admin.js",
-    "vercel-build": "node scripts/db-migrate.js --if-configured"
+    "vercel-build": "node scripts/db-migrate.js --if-configured",
+    "backup": "node scripts/backup.js",
+    "backup:verify": "node scripts/restore-check.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
