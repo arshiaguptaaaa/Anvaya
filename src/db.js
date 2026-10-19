@@ -8,13 +8,7 @@ const path = require('node:path');
 
 // DATABASE_URL (preferred) or POSTGRES_URL (set automatically by the Supabase ↔ Vercel integration).
 const RAW_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
-/** Strips libpq-only query params (sslmode, supa, pgbouncer) — TLS is configured explicitly below. */
-const cleanPgUrl = (u) => {
-  if (!/^postgres/.test(u)) return u;
-  const x = new URL(u);
-  for (const k of ['sslmode', 'supa', 'pgbouncer', 'sslrootcert']) x.searchParams.delete(k);
-  return x.toString();
-};
+const { cleanPgUrl, sslFor } = require('./lib/pgssl');
 const URL_ = cleanPgUrl(RAW_URL);
 let driver;
 
@@ -53,7 +47,7 @@ if (URL_.startsWith('pglite://')) {
     connectionString: URL_,
     max: Number(process.env.PG_POOL_MAX || 3),            // small: each serverless instance has its own pool
     idleTimeoutMillis: 10_000,
-    ssl: /localhost|127\.0\.0\.1/.test(URL_) ? false : { rejectUnauthorized: false },
+    ssl: sslFor(URL_),                        // verified TLS (Supabase root CA for *.supabase.com)
     // Supavisor transaction mode (port 6543) can't hold named prepared statements across transactions.
     // node-postgres only creates named statements when a query passes `name`, which this codebase never does.
   });

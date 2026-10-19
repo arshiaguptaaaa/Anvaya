@@ -20,8 +20,9 @@ const { Client } = require('pg');
   if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production' && !process.env.ALLOW_PREVIEW_MIGRATIONS) {
     console.log(`[migrate] ${process.env.VERCEL_ENV} build — skipping (production data is migrated only by production builds).`); return;
   }
-  const { cleanPgUrl } = { cleanPgUrl: (u) => { const x = new URL(u); for (const k of ['sslmode', 'supa', 'pgbouncer', 'sslrootcert']) x.searchParams.delete(k); return x.toString(); } };
-  const c = new Client({ connectionString: cleanPgUrl(url), ssl: /localhost|127\.0\.0\.1/.test(url) ? false : { rejectUnauthorized: false } });
+  const { cleanPgUrl, sslFor } = require('../src/lib/pgssl');
+  const conn = cleanPgUrl(url);
+  const c = new Client({ connectionString: conn, ssl: sslFor(conn) }); // verified TLS
   await c.connect();
   await c.query('create table if not exists public.anvaya_migrations (name text primary key, applied_at timestamptz not null default now())');
   await c.query('alter table public.anvaya_migrations enable row level security');
