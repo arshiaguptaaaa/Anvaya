@@ -196,7 +196,9 @@ test('a dedicated short-lived invitation expires without changing the global lif
   assert.ok(!(await admin.get('/api/admin/mentors')).json.some((m) => m.email === 'x1@mentors.test'), 'nothing created on invalid input');
   const normal = await admin.post(`/api/admin/mentors/${r.json.id}/resend-invite`);
   assert.ok(new Date(normal.json.invite.expiresAt).getTime() - Date.now() > 71 * 3600e3, 'default stays 72h');
-  await admin.post(`/api/admin/mentors/${r.json.id}/deactivate`);
+  const del = await admin.req('DELETE', `/api/admin/mentors/${r.json.id}`);
+  assert.equal(del.status, 200, 'mentor without history can be deleted');
+  assert.ok(!(await admin.get('/api/admin/mentors')).json.some((m) => m.id === r.json.id));
 });
 
 test('raw invitation tokens are never stored; queued email payloads are encrypted then wiped', async () => {
@@ -554,6 +556,12 @@ test('B2B cohorts: enrollment and restricted cohort report', async () => {
   assert.equal(rep.length, 1); assert.ok('attended' in rep[0] && 'assignments_done' in rep[0]);
   assert.ok(!('notes' in rep[0]) && !('email' in rep[0]));
   assert.equal((await stu2.get(`/api/admin/cohorts/${k.json.id}/report`)).status, 403);
+});
+
+test('mentors with history cannot be deleted (only deactivated)', async () => {
+  const r = await admin.req('DELETE', `/api/admin/mentors/${ids.mentorA}`);
+  assert.equal(r.status, 400); assert.match(r.json.error, /Deactivate/);
+  assert.equal((await mentorA.req('DELETE', `/api/admin/mentors/${ids.mentorB}`)).status, 403);
 });
 
 test('deactivating a mentor ends sessions immediately; disabled staff cannot sign in', async () => {

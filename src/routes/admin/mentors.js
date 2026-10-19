@@ -137,6 +137,22 @@ r.post('/mentors/:id/reactivate', adminOnly, wrap(async (req, res) => {
   res.json({ ok: true, status });
 }));
 
+/** Permanently removes a mentor who has no history (no bookings, ledger, cases, groups or sessions). Otherwise: deactivate. */
+r.delete('/mentors/:id', adminOnly, wrap(async (req, res) => {
+  const mid = id(req);
+  const m = await db.one('select * from anvaya.mentors where id = $1', [mid]);
+  if (!m) throw new HttpError(404, 'Mentor not found.');
+  const used = await db.one(`select
+    (select count(*) from anvaya.bookings where mentor_id = $1) + (select count(*) from anvaya.mentor_ledger where mentor_id = $1) +
+    (select count(*) from anvaya.service_cases where coach_mentor_id = $1) + (select count(*) from anvaya.mentor_groups where mentor_id = $1) +
+    (select count(*) from anvaya.live_sessions where mentor_id = $1) + (select count(*) from anvaya.students where mentor_id = $1) +
+    (select count(*) from anvaya.payouts where mentor_id = $1) as n`, [mid]);
+  if (used.n) throw bad('This mentor has history (sessions, students, cases or money). Deactivate them instead.');
+  await db.run('delete from anvaya.users where id = $1', [m.user_id]); // cascades: mentor, availability, invitations, sessions
+  db.audit(req.auth.user.id, 'mentor_deleted', `mentor:${mid} ${m.name}`);
+  res.json({ ok: true });
+}));
+
 // ── Ledger + payouts (admin) ─────────────────────────────────────────
 r.get('/payables', adminOnly, wrap(async (_req, res) => {
   const mentors = await db.all("select id, name, status from anvaya.mentors order by name");
