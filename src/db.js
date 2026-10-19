@@ -7,7 +7,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 // DATABASE_URL (preferred) or POSTGRES_URL (set automatically by the Supabase ↔ Vercel integration).
-const URL_ = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+const RAW_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+/** Strips libpq-only query params (sslmode, supa, pgbouncer) — TLS is configured explicitly below. */
+const cleanPgUrl = (u) => {
+  if (!/^postgres/.test(u)) return u;
+  const x = new URL(u);
+  for (const k of ['sslmode', 'supa', 'pgbouncer', 'sslrootcert']) x.searchParams.delete(k);
+  return x.toString();
+};
+const URL_ = cleanPgUrl(RAW_URL);
 let driver;
 
 if (URL_.startsWith('pglite://')) {
@@ -83,4 +91,4 @@ const tx = (fn) => need().tx(async (c) => fn({
 const audit = (userId, action, detail = '') =>
   run('insert into anvaya.audit_log (user_id, action, detail) values ($1,$2,$3)', [userId ?? null, action, String(detail)]).catch(() => {});
 
-module.exports = { all, one, run, tx, audit, end: () => driver && driver.end(), configured: () => !!driver };
+module.exports = { cleanPgUrl, all, one, run, tx, audit, end: () => driver && driver.end(), configured: () => !!driver };
