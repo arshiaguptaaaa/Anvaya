@@ -187,6 +187,18 @@ test('mentor: invite → accept → password → profile → active; links singl
   assert.equal((await anon.post('/api/invites/inspect', { token: fresh })).json.state, 'deactivated');
 });
 
+test('a dedicated short-lived invitation expires without changing the global lifetime', async () => {
+  const r = await admin.post('/api/admin/mentors', { name: 'Expiry Probe', email: 'expiry@mentors.test', session_price_paise: rupees(1), expires_in_minutes: 2 });
+  assert.equal(r.status, 201, r.text);
+  const exp = new Date(r.json.invite.expiresAt).getTime() - Date.now();
+  assert.ok(exp > 60e3 && exp <= 120e3, 'link lives ~2 minutes');
+  assert.equal((await admin.post('/api/admin/mentors', { name: 'X', email: 'x1@mentors.test', session_price_paise: 1, expires_in_minutes: 1 })).status, 400, 'minimum 2 minutes');
+  assert.ok(!(await admin.get('/api/admin/mentors')).json.some((m) => m.email === 'x1@mentors.test'), 'nothing created on invalid input');
+  const normal = await admin.post(`/api/admin/mentors/${r.json.id}/resend-invite`);
+  assert.ok(new Date(normal.json.invite.expiresAt).getTime() - Date.now() > 71 * 3600e3, 'default stays 72h');
+  await admin.post(`/api/admin/mentors/${r.json.id}/deactivate`);
+});
+
 test('raw invitation tokens are never stored; queued email payloads are encrypted then wiped', async () => {
   const rows = await db.all("select payload from anvaya.jobs where kind = 'email.send'");
   assert.ok(rows.length);

@@ -9,6 +9,8 @@ const { HttpError, bad, v, id, wrap, setClause } = require('../../lib/http');
 const { staff, adminOnly, isAdmin } = require('./_shared');
 
 const r = express.Router();
+/** Optional per-invitation lifetime in minutes (2 min – 7 days). Leaves the global INVITE_TTL_HOURS untouched. */
+const linkMinutes = (body) => v.int(body?.expires_in_minutes, { min: 2, max: 7 * 24 * 60, label: 'Link lifetime (minutes)' });
 
 const mentorSelect = `select m.*, u.email, (u.password_hash is not null) as has_password, u.last_login_at,
   (select count(*) from anvaya.students s where s.mentor_id = m.id and s.status = 'active') as student_count,
@@ -67,6 +69,7 @@ r.get('/mentors-suggest', staff, wrap(async (req, res) => {
 r.post('/mentors', adminOnly, wrap(async (req, res) => {
   const f = mentorFields(req.body || {}, { partial: false });
   const email = v.email(req.body?.email);
+  const mins = linkMinutes(req.body); // validate before anything is created
   if (await db.one('select 1 from anvaya.users where lower(email) = $1', [email])) throw new HttpError(409, 'An account with this email already exists.');
   const { mentorId, userId } = await db.tx(async (t) => {
     const u = await t.one("insert into anvaya.users (email, name, role) values ($1, $2, 'mentor') returning id", [email, f.name]);
@@ -77,7 +80,7 @@ r.post('/mentors', adminOnly, wrap(async (req, res) => {
   db.audit(req.auth.user.id, 'mentor_created', `mentor:${mentorId}`);
   let invite = null, mailError = null;
   if (req.body?.send_invite !== false) {
-    const out = await accounts.issue(userId, 'mentor_invite', { byUserId: req.auth.user.id });
+    const out = await accounts.issue(userId, 'mentor_invite', { byUserId: req.auth.user.id, expiresInMinutes: mins });
     invite = { expiresAt: out.expiresAt, delivered: out.delivered };
     if (!out.delivered) mailError = out.error || 'Queued for retry';
   }
@@ -108,7 +111,7 @@ r.post('/mentors/:id/resend-invite', adminOnly, wrap(async (req, res) => {
   if (!m) throw new HttpError(404, 'Mentor not found.');
   if (m.status !== 'invite_pending') throw bad(m.status === 'active' ? 'This mentor is already active.' : 'Reactivate this mentor before sending an invitation.');
   if (m.password_hash) throw bad('This mentor has already accepted the invitation and is completing their profile. They can sign in at /mentor/login.');
-  const out = await accounts.issue(m.user_id, 'mentor_invite', { isResend: true, byUserId: req.auth.user.id });
+  const out = await accounts.issue(m.user_id, 'mentor_invite', { isResend: true, byUserId: req.auth.user.id, expiresInMinutes: linkMinutes(req.body) });
   res.json({ ok: true, invite: { expiresAt: out.expiresAt, delivered: out.delivered }, mailError: out.delivered ? null : out.error });
 }));
 

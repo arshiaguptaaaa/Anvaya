@@ -11,12 +11,13 @@ const TTL_HOURS = { mentor_invite: INVITE_TTL, student_invite: INVITE_TTL, staff
 const PATH = { mentor_invite: '/invite', student_invite: '/invite', staff_invite: '/invite', password_reset: '/reset' };
 
 /** Issues a new link (revoking older unused ones of the same kind) and emails it. */
-async function issue(userId, kind, { isResend = false, byUserId = null } = {}) {
+/** expiresInMinutes: optional per-link lifetime (admin-chosen, e.g. for a dedicated expiry test); default is the kind's TTL. */
+async function issue(userId, kind, { isResend = false, byUserId = null, expiresInMinutes = null } = {}) {
   const u = await db.one(`select u.*, m.id as mentor_id, coalesce(m.name, s.name, u.name) as display_name
     from anvaya.users u left join anvaya.mentors m on m.user_id = u.id left join anvaya.students s on s.user_id = u.id where u.id = $1`, [userId]);
   if (!u) throw Object.assign(new Error('Account not found.'), { status: 404 });
   const token = sec.randomToken(32);
-  const expiresAt = new Date(Date.now() + TTL_HOURS[kind] * 3600e3);
+  const expiresAt = new Date(Date.now() + (expiresInMinutes ? expiresInMinutes * 60e3 : TTL_HOURS[kind] * 3600e3));
   const url = `${BASE_URL()}${PATH[kind]}?token=${encodeURIComponent(token)}`;
   const jobId = await db.tx(async (t) => {
     await t.run(`update anvaya.invitations set revoked_at = now() where user_id = $1 and kind = $2 and used_at is null and revoked_at is null`, [userId, kind]);
