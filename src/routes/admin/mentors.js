@@ -34,6 +34,7 @@ function mentorFields(body, { partial }) {
   if (body.session_details !== undefined) out.session_details = v.str(body.session_details, { max: 2000, label: 'Session details' });
   if (body.max_students !== undefined) out.max_students = v.int(body.max_students, { min: 0, max: 500, label: 'Capacity' }) ?? 12;
   if (body.accepts_paid_sessions !== undefined) out.accepts_paid_sessions = v.bool(body.accepts_paid_sessions);
+  if (!partial && body.is_test !== undefined) out.is_test = v.bool(body.is_test);
   return out;
 }
 

@@ -55,7 +55,7 @@ function resource(name, { table, list, spec, required = [], write = adminOnly, d
 resource('tracks', {
   table: 'tracks', list: () => `select t.*, (select count(*) from anvaya.modules m where m.track_id = t.id) as module_count,
     (select count(*) from anvaya.enrollments e where e.track_id = t.id and e.status = 'active') as enrolled from anvaya.tracks t order by t.name`,
-  spec: { name: (x) => v.str(x, { max: 120, required: true, label: 'Name' }), target_role: (x) => v.str(x, { max: 120 }), description: (x) => v.str(x, { max: 3000 }), active: (x) => v.bool(x) },
+  spec: { name: (x) => v.str(x, { max: 120, required: true, label: 'Name' }), target_role: (x) => v.str(x, { max: 120 }), description: (x) => v.str(x, { max: 3000 }), active: (x) => v.bool(x), is_test: (x) => v.bool(x) },
   required: ['name'],
 });
 resource('modules', {
@@ -122,7 +122,7 @@ resource('groups', {
     left join anvaya.cohorts k on k.id = g.cohort_id order by g.active desc, g.name`,
   spec: { name: (x) => v.str(x, { max: 120, required: true, label: 'Name' }), track_id: ref('tracks', 'Track'), cohort_id: ref('cohorts', 'Cohort'), mentor_id: activeMentorRef,
     target_role: (x) => v.str(x, { max: 120 }), prep_level: (x) => v.str(x, { max: 60 }), availability: (x) => v.str(x, { max: 120 }),
-    capacity: (x) => v.int(x, { min: 1, max: 100, label: 'Capacity' }), meet_link: (x) => v.url(x, 'Meet link'), whatsapp_link: (x) => v.url(x, 'WhatsApp link'), active: (x) => v.bool(x) },
+    capacity: (x) => v.int(x, { min: 1, max: 100, label: 'Capacity' }), meet_link: (x) => v.url(x, 'Meet link'), whatsapp_link: (x) => v.url(x, 'WhatsApp link'), active: (x) => v.bool(x), is_test: (x) => v.bool(x) },
   required: ['name'], write: staff,
   before: async (f, _req, rid) => { if (!rid && f.capacity == null) f.capacity = Number(await settings.get('group_capacity_default')); },
 });
@@ -192,6 +192,7 @@ const liveSpec = {
   starts_at: (x) => v.date(x, { required: true, label: 'Start' }), ends_at: (x) => v.date(x, { required: true, label: 'End' }),
   meet_link: (x) => v.url(x, 'Meet link'), status: (x) => v.oneOf(x, ['scheduled', 'completed', 'cancelled'], 'Status'),
   delivery_fee_paise: (x) => v.paise(x, { label: 'Delivery fee' }) ?? 0, notes: (x) => v.str(x, { max: 3000 }),
+  is_test: (x) => v.bool(x),
 };
 r.get('/live-sessions', staff, wrap(async (req, res) => {
   const rows = await db.all(`select l.*, g.name as group_name, t.name as track_name, m.name as mentor_name, k.name as cohort_name,
@@ -203,7 +204,7 @@ r.get('/live-sessions', staff, wrap(async (req, res) => {
 }));
 async function saveLive(req, rid) {
   const spec = { ...liveSpec };
-  if (!isAdmin(req)) delete spec.delivery_fee_paise; // money is admin-only
+  if (!isAdmin(req)) { delete spec.delivery_fee_paise; delete spec.is_test; } // money + test flag are admin-only
   const f = await fields(spec, rid ? [] : ['kind', 'title', 'starts_at', 'ends_at'])(req.body || {}, { partial: !!rid });
   if (f.starts_at && f.ends_at && f.ends_at <= f.starts_at) throw bad('The session must end after it starts.');
   if (!rid && !f.meet_link && f.group_id) f.meet_link = (await db.one('select meet_link from anvaya.mentor_groups where id = $1', [f.group_id]))?.meet_link || '';

@@ -20,6 +20,7 @@ const productFields = fields({
   billing_period: (x) => v.oneOf(x, PERIODS, 'Billing period'),
   active: (x) => v.bool(x),
   digital_document_id: (x) => v.id(x, 'Document'),
+  is_test: (x) => v.bool(x),
 }, ['kind', 'name', 'price_paise']);
 
 r.get('/products', staff, wrap(async (_req, res) => {

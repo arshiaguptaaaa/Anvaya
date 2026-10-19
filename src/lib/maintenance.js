@@ -35,22 +35,26 @@ jobs.register('subscriptions.daily', async () => {
 });
 
 /** Emails reminders for live sessions and 1:1 bookings starting in the next 24 hours (once each). */
+/** Emails two reminders per session: ~24 hours before and ~2 hours before (each once, deduplicated).
+ *  Timeliness depends on how often this runs: every 5 minutes on Vercel Pro cron; once a day on Hobby. */
 jobs.register('sessions.reminders', async () => {
   let n = 0;
-  const bookings = await db.all(`select b.id, b.scheduled_at, b.service, b.meeting_link, s.email, s.id as sid from anvaya.bookings b join anvaya.students s on s.id = b.student_id
-    where b.status = 'scheduled' and b.scheduled_at between now() and now() + interval '24 hours' and s.email <> ''`);
-  for (const b of bookings) {
-    const r = await jobs.enqueue('email.send', { to: b.email, template: 'session_reminder', data: { title: b.service || 'Mentor session', startsAt: b.scheduled_at, meetLink: b.meeting_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },
-      { dedupeKey: `remind:booking:${b.id}` });
-    if (r) n++;
-  }
-  const lives = await db.all(`select * from anvaya.live_sessions where status = 'scheduled' and starts_at between now() and now() + interval '24 hours'`);
   const { roster } = require('../routes/admin/learning');
-  for (const l of lives) {
-    for (const p of (await roster(l)).filter((x) => x.email)) {
-      const r = await jobs.enqueue('email.send', { to: p.email, template: 'session_reminder', data: { title: l.title, startsAt: l.starts_at, meetLink: l.meet_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },
-        { dedupeKey: `remind:live:${l.id}:${p.id}` });
+  for (const [tag, hours] of [['24h', 24], ['2h', 2]]) {
+    const bookings = await db.all(`select b.id, b.scheduled_at, b.service, b.meeting_link, s.email, s.id as sid from anvaya.bookings b join anvaya.students s on s.id = b.student_id
+      where b.status = 'scheduled' and b.scheduled_at between now() and now() + make_interval(hours => $1) and s.email <> ''`, [hours]);
+    for (const b of bookings) {
+      const r = await jobs.enqueue('email.send', { to: b.email, template: 'session_reminder', data: { title: b.service || 'Mentor session', startsAt: b.scheduled_at, meetLink: b.meeting_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },
+        { dedupeKey: `remind:${tag}:booking:${b.id}` });
       if (r) n++;
+    }
+    const lives = await db.all(`select * from anvaya.live_sessions where status = 'scheduled' and starts_at between now() and now() + make_interval(hours => $1)`, [hours]);
+    for (const l of lives) {
+      for (const p of (await roster(l)).filter((x) => x.email)) {
+        const r = await jobs.enqueue('email.send', { to: p.email, template: 'session_reminder', data: { title: l.title, startsAt: l.starts_at, meetLink: l.meet_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },
+          { dedupeKey: `remind:${tag}:live:${l.id}:${p.id}` });
+        if (r) n++;
+      }
     }
   }
   return { queued: n };
@@ -68,7 +72,7 @@ async function schedulePeriodic() {
   const hour = new Date().toISOString().slice(0, 13);
   const day = hour.slice(0, 10);
   await jobs.enqueue('bookings.release_holds', {}, { dedupeKey: `holds:${hour}:${Math.floor(new Date().getMinutes() / 10)}` });
-  await jobs.enqueue('sessions.reminders', {}, { dedupeKey: `reminders:${hour}` });
+  await jobs.enqueue('sessions.reminders', {}, { dedupeKey: `reminders:${hour}:${Math.floor(new Date().getMinutes() / 5)}` });
   await jobs.enqueue('payments.reconcile', {}, { dedupeKey: `reconcile:${hour}` });
   await jobs.enqueue('subscriptions.daily', {}, { dedupeKey: `subs:${day}` });
   await jobs.enqueue('maintenance.cleanup', {}, { dedupeKey: `cleanup:${day}` });

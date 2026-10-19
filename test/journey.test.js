@@ -307,6 +307,9 @@ test('subscription purchase via Razorpay: verified signature, idempotent webhook
   const ord = await admin.post('/api/admin/orders', { student_id: ids.s2, product_id: ids.plan });
   assert.equal((await admin.post(`/api/admin/orders/${ord.json.id}/record-payment`, { method: 'UPI', reference: 'UPI-REF-1' })).status, 200);
   assert.equal((await stu2.get('/api/student/me')).json.subscription.effective_access, 'active');
+  const audit = (await admin.get('/api/admin/audit')).json;
+  assert.ok(audit.some((a) => a.action === 'payment_recorded') && audit.some((a) => a.action === 'subscription_granted'), 'audit trail records payment + grant');
+  assert.equal((await stu2.get('/api/admin/audit')).status, 403);
 });
 
 test('syllabus, assignment submission and progress', async () => {
@@ -571,6 +574,20 @@ test('deactivating a mentor ends sessions immediately; disabled staff cannot sig
   await admin.post(`/api/admin/team/${riya.id}/disable`);
   assert.equal((await ops.get('/api/admin/leads')).status, 401);
   assert.equal((await new Client().login('riya@anvaya.test', 'Intern-pass-01')).status, 403);
+});
+
+test('purge removes only records flagged is_test, including paid test orders', async () => {
+  const realStudents = (await admin.get('/api/admin/students')).json.length;
+  const p = await admin.post('/api/admin/products', { kind: 'subscription_plan', name: 'TEST plan', price_paise: 100, billing_period: 'month', active: false, is_test: true });
+  const s = await admin.post('/api/admin/students', { name: 'TEST purge student', is_test: true });
+  const o = await admin.post('/api/admin/orders', { student_id: s.json.id, product_id: p.json.id });
+  await admin.post(`/api/admin/orders/${o.json.id}/record-payment`, { method: 'UPI', reference: 'TEST' });
+  assert.equal((await admin.req('DELETE', `/api/admin/students/${s.json.id}`)).status, 400, 'paid students cannot be deleted normally');
+  assert.equal((await admin.post('/api/admin/test-data/purge', { confirm: 'yes' })).status, 400);
+  const r = await admin.post('/api/admin/test-data/purge', { confirm: 'DELETE TEST DATA' });
+  assert.equal(r.status, 200, r.text); assert.equal(r.json.deleted.students, 1); assert.equal(r.json.deleted.products, 1);
+  assert.equal((await admin.get('/api/admin/students')).json.length, realStudents, 'real students untouched');
+  assert.ok((await admin.get('/api/admin/products')).json.length >= 3, 'real products untouched');
 });
 
 test('brute-force logins are rate limited', async () => {

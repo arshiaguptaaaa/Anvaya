@@ -28,6 +28,7 @@ const leadFields = fields({
   next_action: (x) => v.str(x, { max: 300, label: 'Next action' }),
   follow_up_at: (x) => v.date(x, { label: 'Follow-up date' }),
   notes: (x) => v.str(x, { max: 3000, label: 'Notes' }),
+  is_test: (x) => v.bool(x),
 }, ['name']);
 
 r.get('/team-options', staff, wrap(async (_req, res) => {
@@ -135,10 +136,11 @@ const studentSpec = {
   needs_followup: (x) => v.bool(x),
   followup_reason: (x) => v.str(x, { max: 300, label: 'Follow-up reason' }),
   notes: (x) => v.str(x, { max: 3000, label: 'Notes' }),
+  is_test: (x) => v.bool(x),
 };
 const studentFieldsFor = (req) => {
   const spec = { ...studentSpec };
-  if (!isAdmin(req)) delete spec.notes; // sensitive admin notes
+  if (!isAdmin(req)) { delete spec.notes; delete spec.is_test; } // sensitive admin notes; test flag is admin-only
   return fields(spec, ['name']);
 };
 

@@ -136,7 +136,50 @@ r.post('/system/email-domain', adminOnly, wrap(async (_req, res) => {
   if (!domain) throw bad('MAIL_FROM must contain an email address on your domain.');
   res.json(await mailer.resendSetupDomain(domain));
 }));
-r.post('/system/run-jobs', adminOnly, wrap(async (_req, res) => res.json(await jobs.processDue({ limit: 20 }))));
+r.post('/system/run-jobs', adminOnly, wrap(async (_req, res) => {
+  await require('../../lib/maintenance').schedulePeriodic(); // same as the cron: reminders, renewals, holds, reconciliation
+  res.json(await jobs.processDue({ limit: 40 }));
+}));
+/** Deletes ONLY records flagged is_test (and everything that hangs off them). Requires an explicit confirmation phrase. */
+r.post('/test-data/purge', adminOnly, wrap(async (req, res) => {
+  if (req.body?.confirm !== 'DELETE TEST DATA') throw bad('Type DELETE TEST DATA to confirm.');
+  const out = await db.tx(async (t) => {
+    const n = {};
+    const del = async (k, sql, p = []) => { n[k] = (await t.run(sql, p)).rowCount; };
+    const TS = 'select id from anvaya.students where is_test';
+    const TM = 'select id from anvaya.mentors where is_test';
+    await del('refunds', `delete from anvaya.refunds where payment_id in (select id from anvaya.payments where student_id in (${TS}))`);
+    await del('payments', `delete from anvaya.payments where student_id in (${TS})`);
+    await del('subscriptions', `delete from anvaya.subscriptions where student_id in (${TS}) or product_id in (select id from anvaya.products where is_test)`);
+    await del('mentor_ledger', `delete from anvaya.mentor_ledger where mentor_id in (${TM}) or booking_id in (select id from anvaya.bookings where student_id in (${TS}))`);
+    await del('payouts', `delete from anvaya.payouts where mentor_id in (${TM})`);
+    await del('bookings', `delete from anvaya.bookings where student_id in (${TS}) or mentor_id in (${TM})`);
+    await del('service_cases', `delete from anvaya.service_cases where student_id in (${TS})`);
+    await del('orders', `delete from anvaya.orders where student_id in (${TS})`);
+    await del('live_sessions', 'delete from anvaya.live_sessions where is_test');
+    await del('groups', 'delete from anvaya.mentor_groups where is_test');
+    const studentUsers = (await t.all(`select user_id from anvaya.students where is_test and user_id is not null`)).map((x) => x.user_id);
+    await del('students', 'delete from anvaya.students where is_test');
+    const mentorUsers = (await t.all('select user_id from anvaya.mentors where is_test')).map((x) => x.user_id);
+    await del('mentor_users', 'delete from anvaya.users where id = any($1::bigint[])', [mentorUsers]); // cascades mentor, availability, invitations, sessions
+    await del('student_users', "delete from anvaya.users where id = any($1::bigint[]) and role = 'student'", [studentUsers]);
+    await del('products', 'delete from anvaya.products where is_test');
+    await del('tracks', 'delete from anvaya.tracks where is_test');
+    await del('cohorts', 'delete from anvaya.cohorts where is_test');
+    await del('colleges', 'delete from anvaya.colleges where is_test');
+    await del('leads', 'delete from anvaya.leads where is_test');
+    return n;
+  });
+  db.audit(req.auth.user.id, 'test_data_purged', JSON.stringify(out));
+  res.json({ ok: true, deleted: out });
+}));
+
+/** Audit trail (admin): who did what, when. */
+r.get('/audit', adminOnly, wrap(async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  res.json(await db.all(`select a.id, a.action, a.detail, a.created_at, coalesce(nullif(u.name,''), u.email) as user_name, u.role
+    from anvaya.audit_log a left join anvaya.users u on u.id = a.user_id order by a.id desc limit $1`, [limit]));
+}));
 r.post('/system/test-email', adminOnly, wrap(async (req, res) => {
   const to = v.email(req.body?.to || req.auth.user.email);
   const out = await sendEmail(to, 'test', { from: mailer.from() });

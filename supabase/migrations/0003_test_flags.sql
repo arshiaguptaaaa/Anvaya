@@ -1,0 +1,10 @@
+-- Synthetic/test records are flagged so they can be purged without touching real data.
+alter table anvaya.students       add column if not exists is_test boolean not null default false;
+alter table anvaya.products       add column if not exists is_test boolean not null default false;
+alter table anvaya.mentors        add column if not exists is_test boolean not null default false;
+alter table anvaya.tracks         add column if not exists is_test boolean not null default false;
+alter table anvaya.mentor_groups  add column if not exists is_test boolean not null default false;
+alter table anvaya.live_sessions  add column if not exists is_test boolean not null default false;
+alter table anvaya.leads          add column if not exists is_test boolean not null default false;
+alter table anvaya.cohorts        add column if not exists is_test boolean not null default false;
+alter table anvaya.colleges       add column if not exists is_test boolean not null default false;

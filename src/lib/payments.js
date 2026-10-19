@@ -106,7 +106,8 @@ async function fulfil(t, order, userId) {
       }
     }
   } else if (product?.kind === 'subscription_plan') {
-    await subs.grantFromOrder(t, order, product);
+    const subId = await subs.grantFromOrder(t, order, product);
+    await t.run("insert into anvaya.audit_log (user_id, action, detail) values ($1, 'subscription_granted', $2)", [userId, `subscription:${subId} order:${order.id} student:${order.student_id} plan:${product.id}`]);
   } else if (product && ['resume_service', 'linkedin_service', 'coaching_package'].includes(product.kind)) {
     const kind = { resume_service: 'resume_rewrite', linkedin_service: 'linkedin_rewrite', coaching_package: 'coaching_package' }[product.kind];
     const exists = await t.one('select id from anvaya.service_cases where order_id = $1', [order.id]);
