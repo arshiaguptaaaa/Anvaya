@@ -143,8 +143,11 @@ r.post('/system/run-jobs', adminOnly, wrap(async (_req, res) => {
 /** Deletes ONLY records flagged is_test (and everything that hangs off them). Requires an explicit confirmation phrase. */
 r.post('/test-data/purge', adminOnly, wrap(async (req, res) => {
   if (req.body?.confirm !== 'DELETE TEST DATA') throw bad('Type DELETE TEST DATA to confirm.');
+  let paths = [];
   const out = await db.tx(async (t) => {
     const n = {};
+    paths = (await t.all(`select v.storage_path from anvaya.document_versions v join anvaya.documents d on d.id = v.document_id
+      where v.storage_path is not null and d.student_id in (select id from anvaya.students where is_test)`)).map((x) => x.storage_path);
     const del = async (k, sql, p = []) => { n[k] = (await t.run(sql, p)).rowCount; };
     const TS = 'select id from anvaya.students where is_test';
     const TM = 'select id from anvaya.mentors where is_test';
@@ -170,6 +173,8 @@ r.post('/test-data/purge', adminOnly, wrap(async (req, res) => {
     await del('leads', 'delete from anvaya.leads where is_test');
     return n;
   });
+  // Storage objects go after the rows commit, so a storage failure never leaves rows pointing at deleted files.
+  try { out.storage_objects = await storage.remove(paths); } catch (e) { out.storage_error = e.message; }
   db.audit(req.auth.user.id, 'test_data_purged', JSON.stringify(out));
   res.json({ ok: true, deleted: out });
 }));

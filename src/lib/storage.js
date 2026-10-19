@@ -100,6 +100,14 @@ async function download(path) {
   return Buffer.from(await r.arrayBuffer());
 }
 
+/** Deletes objects (used by the test-data purge). */
+async function remove(paths) {
+  if (!paths.length || mode === 'none') return 0;
+  if (mode === 'memory') { for (const k of paths) mem.delete(k); return paths.length; }
+  const out = await sb(`/object/${BUCKET}`, { method: 'DELETE', body: { prefixes: paths } });
+  return Array.isArray(out) ? out.length : 0;
+}
+
 /** Express handlers for the memory driver only (never mounted when Supabase is configured). */
 function memoryRoutes(app, express) {
   if (mode !== 'memory') return;
@@ -119,4 +127,4 @@ function memoryRoutes(app, express) {
   });
 }
 
-module.exports = { createUpload, stat, signedDownload, putText, list, download, memoryRoutes, mode: () => mode, BUCKET, ALLOWED, MAX_BYTES, origin: () => base };
+module.exports = { createUpload, stat, signedDownload, putText, list, download, remove, memoryRoutes, mode: () => mode, BUCKET, ALLOWED, MAX_BYTES, origin: () => base };
