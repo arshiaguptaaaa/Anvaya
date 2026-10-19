@@ -416,8 +416,8 @@
   async function services() {
     const rows = await api('/api/admin/cases');
     setCount('services', rows.filter((c) => !['delivered', 'closed', 'cancelled'].includes(c.status)).length);
-    main.innerHTML = pageHead('Delivery', 'Resume <em>services</em>', 'Intake → coach → draft → coach edit → QA → your approval → delivery → revision. AI drafts never reach a student without QA and approval.',
-      isAdmin ? '<button class="btn btn-ghost" data-pb>Playbook &amp; AI</button><button class="btn btn-primary" data-new>+ Open case</button>' : '');
+    main.innerHTML = pageHead('Delivery', 'Resume <em>services</em>', 'Intake → coach → draft → coach edit → QA → your approval → delivery → revision. Nothing reaches a student without QA and your approval.',
+      isAdmin ? '<button class="btn btn-ghost" data-pb>Playbook</button><button class="btn btn-primary" data-new>+ Open case</button>' : '');
     const card = tableCard({
       rows, search: (c) => `${c.student_name} ${c.coach_name || ''} ${c.kind}`, filter: { key: 'status', options: ['intake', 'assigned', 'first_draft', 'coach_edit', 'qa', 'delivered', 'revision', 'closed'].map((s) => [s, label(s)]) },
       columns: [
@@ -456,19 +456,17 @@
     });
   }
   async function playbookModal() {
-    const [pbs, usage] = await Promise.all([api('/api/admin/playbooks'), api('/api/admin/ai/usage')]);
+    const pbs = await api('/api/admin/playbooks');
     const ui = modal(`<div class="eyebrow">Resume Strategy Playbook</div><h2 class="h2 mb-2">Playbook <em>versions</em></h2>
-      <p class="hint mb-2">Versions are immutable. The active version is the drafting rubric for new cases and AI runs; each case records which version it used.</p>
+      <p class="hint mb-2">Versions are immutable. The active version is the drafting rubric for new cases; each case records which version it used.</p>
       <ul class="list">${pbs.map((p) => `<li><span class="strong">${esc(p.version_label)} ${p.is_active ? '<span class="pill ok">Active</span>' : ''}<span class="sub-line">${p.case_count} cases · ${esc(d(p.created_at))}</span></span>
         <span class="row">${p.file_version_id ? `<button class="btn btn-ghost btn-sm" data-open="${p.file_version_id}">File</button>` : ''}${p.is_active ? '' : `<button class="btn btn-ghost btn-sm" data-activate="${p.id}">Activate</button>`}</span></li>`).join('') || '<li class="muted">No versions yet.</li>'}</ul>
       <form novalidate class="mt-2"><div class="form-error" hidden></div><div class="section-label">New version</div><div class="form-grid">
         <div class="field"><label class="label">Version label</label><input class="input" name="version_label" placeholder="v1.1" required></div>
         <div class="field"><label class="label">Playbook file (optional, private)</label><input class="input" type="file" name="file" accept=".pdf,.doc,.docx,.txt"></div>
-        <div class="field span-2"><label class="label">Drafting rubric (used by AI and QA)</label><textarea class="input" name="rubric_text" rows="8" required></textarea></div>
+        <div class="field span-2"><label class="label">Drafting rubric (used by coaches and QA)</label><textarea class="input" name="rubric_text" rows="8" required></textarea></div>
         <div class="field span-2"><label class="label">Change notes</label><input class="input" name="notes"></div></div>
-        <div class="row"><button class="btn btn-primary btn-sm" type="submit">Save version</button></div></form>
-      <div class="section-label mt-3">AI usage this month</div>
-      <p class="small">${usage.configured ? `${esc(usage.provider)} · ${esc(usage.model)}` : 'Not configured (AI_PROVIDER / ANTHROPIC_API_KEY)'} — ${usage.month.runs} runs · ${inr(usage.month.cost_paise)} (cap in Settings)</p>`, { wide: true });
+        <div class="row"><button class="btn btn-primary btn-sm" type="submit">Save version</button></div></form>`, { wide: true });
     ui.el.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => A.openFile(b.dataset.open)));
     ui.el.querySelectorAll('[data-activate]').forEach((b) => b.addEventListener('click', async () => { await api(`/api/admin/playbooks/${b.dataset.activate}/activate`, { method: 'POST', body: {} }); ui.close(); toast('Activated'); playbookModal(); }));
     onSubmit(ui.el.querySelector('form'), async (dta) => {
@@ -670,11 +668,9 @@
       ${A.fieldHtml({ name: 'booking_min_notice_hours', label: 'Minimum booking notice (hours)', type: 'number', min: 0 }, s.booking_min_notice_hours)}
       ${A.fieldHtml({ name: 'booking_window_days', label: 'How far ahead students can book (days)', type: 'number', min: 1 }, s.booking_window_days)}
       ${A.fieldHtml({ name: 'commission_percent', label: 'Commission on private sessions (%)', type: 'number', min: 0, hint: 'Currently 0 — the full fee is owed to the mentor.', disabled: true }, s.commission_percent)}
-      ${A.fieldHtml({ name: 'ai_monthly_cap_paise', label: 'AI spend cap per month', type: 'money' }, s.ai_monthly_cap_paise)}
-      ${A.fieldHtml({ name: 'ai_max_runs_per_month', label: 'AI runs per month', type: 'number', min: 0 }, s.ai_max_runs_per_month)}
       </div><button class="btn btn-primary" type="submit">Save settings</button></form></div>`;
     onSubmit(main.querySelector('form'), async (dta) => {
-      const body = { ...dta, renewal_reminder_days: String(dta.renewal_reminder_days).split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x)), ai_monthly_cap_paise: A.toPaise(dta.ai_monthly_cap_paise) };
+      const body = { ...dta, renewal_reminder_days: String(dta.renewal_reminder_days).split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x)) };
       await api('/api/admin/settings', { method: 'PUT', body }); toast('Settings saved');
     });
   }
@@ -686,7 +682,6 @@
         <dt>Email</dt><dd>${ok(s.mail.mode !== 'none')} ${esc(s.mail.mode)} · from ${esc(s.mail.from)}</dd>
         <dt>File storage</dt><dd>${ok(s.storage.mode === 'supabase')} ${esc(s.storage.mode)} · bucket ${esc(s.storage.bucket)}</dd>
         <dt>Payments</dt><dd>${ok(s.payments.configured)} Razorpay · webhook secret ${s.payments.webhookSecret ? 'set' : 'missing'}</dd>
-        <dt>AI</dt><dd>${ok(s.ai.configured)} ${esc(s.ai.provider || '')} ${esc(s.ai.model || '')}</dd>
         <dt>Google Sheet</dt><dd>${ok(s.sheet.configured)} ${s.sheet.failed} failed · ${s.sheet.pending} pending</dd>
         <dt>Cron</dt><dd>${ok(s.cron.secret)}</dd></dl></div>
       <div class="card card-pad"><div class="section-label">Email domain (Resend)</div>${s.mail.domainError ? `<p class="due small">${esc(s.mail.domainError)}</p>` : ''}

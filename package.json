@@ -18,7 +18,6 @@
     "backup:verify": "node scripts/restore-check.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0",
     "@vercel/functions": "^3.10.1",
     "express": "^4.21.2",
     "nodemailer": "^6.9.16",

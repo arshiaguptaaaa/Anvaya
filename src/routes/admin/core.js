@@ -115,7 +115,6 @@ r.get('/system', adminOnly, wrap(async (_req, res) => {
     mail: { mode: mailer.mailMode(), from: mailer.from(), domains, domainError },
     storage: { mode: storage.mode(), bucket: storage.BUCKET },
     payments: { configured: payments.configured(), webhookSecret: !!process.env.RAZORPAY_WEBHOOK_SECRET },
-    ai: { configured: !!(process.env.AI_PROVIDER && process.env.AI_API_KEY), provider: process.env.AI_PROVIDER || null, model: process.env.AI_MODEL || null },
     sheet: { configured: !!process.env.GOOGLE_SHEET_WEBHOOK_URL, failed: await n("select count(*) n from anvaya.leads where sheet_sync_status = 'failed'"), pending: await n("select count(*) n from anvaya.leads where sheet_sync_status = 'pending'") },
     cron: { secret: !!process.env.CRON_SECRET },
     jobs: await db.all(`select kind, status, count(*) n, max(last_error) as last_error from anvaya.jobs

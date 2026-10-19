@@ -13,7 +13,7 @@ let sheetMode = 'ok';
 const sheetHits = [];
 Object.assign(process.env, {
   DATABASE_URL: 'pglite://memory', MAIL_TRANSPORT: 'memory', RESEND_API_KEY: '', SMTP_HOST: '', STORAGE_DRIVER: 'memory',
-  SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '', JOBS_AUTORUN: 'false', ANTHROPIC_API_KEY: '', AI_PROVIDER: '',
+  SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '', JOBS_AUTORUN: 'false',
   PORT: String(PORT), APP_BASE_URL: `http://localhost:${PORT}`, CRON_SECRET: 'cron-test-secret',
   ADMIN_EMAIL: 'admin@anvaya.test', ADMIN_PASSWORD: 'Admin-pass-2026',
   RAZORPAY_KEY_ID: 'rzp_fake_test', RAZORPAY_KEY_SECRET: 'rzp-secret', RAZORPAY_WEBHOOK_SECRET: 'whsec-test',
@@ -459,7 +459,7 @@ test('students see only their own records; never admin or mentor APIs', async ()
 });
 
 // ═══ Resume workflow ══════════════════════════════════════════════════
-test('resume service: purchase → case → coach → draft → QA → admin approval → delivery; AI never auto-delivers', async () => {
+test('resume service: purchase → case → coach → draft → QA → admin approval → delivery; nothing reaches the student without QA + approval', async () => {
   const o = await admin.post('/api/admin/orders', { student_id: ids.s1, product_id: ids.resumeProduct });
   await admin.post(`/api/admin/orders/${o.json.id}/record-payment`, { method: 'UPI' });
   const c = await db.one('select * from anvaya.service_cases where order_id = $1', [o.json.id]);
@@ -477,8 +477,8 @@ test('resume service: purchase → case → coach → draft → QA → admin app
   assert.equal((await mentorB.get(`/api/cases/${c.id}`)).status, 404, 'other mentors cannot open the case');
   const ws = (await mentorA.get(`/api/cases/${c.id}`)).json;
   assert.equal(ws.can_edit, true); assert.match(ws.case.source_facts, /Swiggy/);
-  assert.equal(ws.ai_configured, false);
-  assert.equal((await mentorA.post(`/api/cases/${c.id}/ai`, { purpose: 'draft' })).status, 503, 'AI blocked without configuration');
+  assert.equal(ws.ai_configured, undefined, 'AI drafting is removed');
+  assert.equal((await mentorA.post(`/api/cases/${c.id}/ai`, { purpose: 'draft' })).status, 404, 'no AI endpoint');
   assert.equal((await mentorA.post(`/api/cases/${c.id}/submit-qa`)).status, 400);
   const d = await mentorA.post(`/api/cases/${c.id}/drafts`, { body_text: 'RAHUL SHARMA\n• Built an ops dashboard at Swiggy [ADD METRIC: users?]' });
   assert.equal(d.status, 201, d.text);

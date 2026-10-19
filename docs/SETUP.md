@@ -51,9 +51,8 @@ events `payment.captured`, `payment.failed`, `order.paid`, `refund.processed`, c
 Test with Test-mode keys first (`rzp_test_…`), then swap to Live keys. Until configured, students’ purchases become
 “awaiting payment” requests and you record UPI/bank payments in **Payments → Record payment**.
 
-## 4. AI drafting (later; capped)
-console.anthropic.com → API keys → `ANTHROPIC_API_KEY`, plus `AI_PROVIDER=anthropic` (optional `AI_MODEL`, default
-`claude-opus-5-5`). Monthly cap and run limit live in **Admin → Settings**.
+## 4. AI drafting
+Removed from scope. Coaches write drafts by hand from the source facts; QA and admin approval are unchanged.
 
 ## 5. GitHub + Vercel plan
 * Create an **empty private** repo `arshiaguptaaaa/anvaya` (github.com/new — no README). Claude pushes over SSH and connects it to Vercel.

@@ -2,10 +2,10 @@
 // Configurable defaults stored in anvaya.settings. Financial keys are admin-only.
 const db = require('../db');
 
-const FINANCIAL = new Set(['commission_percent', 'ai_monthly_cap_paise', 'ai_max_runs_per_month']);
+const FINANCIAL = new Set(['commission_percent']);
 const DEFAULTS = {
   group_capacity_default: 8, subscription_grace_days: 5, renewal_reminder_days: [7, 2], booking_hold_minutes: 15,
-  booking_min_notice_hours: 12, booking_window_days: 21, commission_percent: 0, ai_monthly_cap_paise: 70000, ai_max_runs_per_month: 60,
+  booking_min_notice_hours: 12, booking_window_days: 21, commission_percent: 0,
 };
 
 async function all(q = db) {

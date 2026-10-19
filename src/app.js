@@ -9,7 +9,6 @@ const storage = require('./lib/storage');
 require('./lib/email');        // registers email.send
 require('./lib/payments');     // registers payments.* jobs
 require('./lib/maintenance');  // registers scheduled jobs
-require('./lib/ai');           // registers ai.run
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 if (IS_PROD && !process.env.APP_BASE_URL) throw new Error('APP_BASE_URL must be set in production (used to build links in emails).');

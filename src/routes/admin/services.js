@@ -4,7 +4,6 @@
 // Delivery requires a passing QA review of the exact version being delivered AND an admin approval.
 const express = require('express');
 const db = require('../../db');
-const ai = require('../../lib/ai');
 const ledger = require('../../lib/ledger');
 const { sendEmail } = require('../../lib/email');
 const { HttpError, bad, v, id, wrap } = require('../../lib/http');
@@ -33,10 +32,6 @@ r.post('/playbooks/:id/activate', adminOnly, wrap(async (req, res) => {
     if (!x.rowCount) throw new HttpError(404, 'Not found.');
   });
   res.json({ ok: true });
-}));
-r.get('/ai/usage', adminOnly, wrap(async (_req, res) => {
-  res.json({ configured: ai.configured(), provider: ai.PROVIDER, model: ai.MODEL, month: await ai.usageThisMonth(),
-    recent: await db.all('select id, case_id, purpose, status, model, input_tokens, output_tokens, cost_paise, error, created_at from anvaya.ai_runs order by id desc limit 30') });
 }));
 
 // ── Cases (admin + ops overview) ─────────────────────────────────────

@@ -1,5 +1,5 @@
 // Case workspace for resume/LinkedIn services — used by admins (QA + approval) and the assigned coach.
-// AI output is shown as a draft with its questions; delivery always needs a passing QA and an admin approval.
+// Coaches write drafts from the source facts; delivery always needs a passing QA and an admin approval.
 (function () {
   const { api, esc, dt, toast, modal, onSubmit, statusPill, openFile } = A;
 
@@ -10,16 +10,8 @@
     const c = w.case;
     const docs = w.documents || [];
     const latestEdit = docs.find((x) => ['coach_draft', 'linkedin'].includes(x.kind));
-    const latestAi = docs.find((x) => x.kind === 'ai_draft');
     const editable = w.can_edit && ['assigned', 'first_draft', 'coach_edit', 'revision'].includes(c.status);
     const reviewable = docs.filter((x) => ['coach_draft', 'linkedin'].includes(x.kind));
-    const aiBlock = (w.ai_runs || []).map((r) => {
-      let out = null; try { out = JSON.parse(r.output_text || 'null'); } catch { /* raw */ }
-      return `<div class="note-box mb-2"><div class="row-between mb-1"><span class="small muted">${esc(A.label(r.purpose))} · ${esc(r.model)} · ${esc(dt(r.created_at))}</span>${statusPill(r.status)}</div>
-        ${r.error ? `<p class="small">${esc(r.error)}</p>` : ''}
-        ${out?.questions?.length ? `<p class="small strong">Questions for the student</p><ul class="small">${out.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}
-        ${out?.missing?.length ? `<p class="small strong mt-1">Missing</p><ul class="small">${out.missing.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}</div>`;
-    }).join('');
 
     ui = modal(`<div class="eyebrow">${esc(A.label(c.kind))} · Case #${c.id}</div>
       <div class="row-between mb-2"><h2 class="h2">${esc(w.student.name)}</h2>${statusPill(c.status)}</div>
@@ -31,15 +23,9 @@
         <textarea class="input mb-1" name="source_facts" rows="6" ${w.can_edit ? '' : 'disabled'}>${esc(c.source_facts)}</textarea>
         ${(w.student_resumes || []).map((r) => r.version_id ? `<button type="button" class="link-btn mr" data-open="${r.version_id}">Open uploaded resume: ${esc(r.title)}</button>` : '').join(' ')}
         ${w.can_edit ? '<div class="row mt-1"><button class="btn btn-ghost btn-sm" type="submit">Save facts</button></div>' : ''}</form>
-      <div class="section-label mt-2">AI assistant</div>
-      ${w.ai_configured ? `<p class="hint mb-1">AI only drafts from the facts above, marks missing metrics as [ADD METRIC: …] and never invents achievements. A coach must edit and QA must pass before delivery.</p>
-        ${w.can_edit && editable ? '<div class="row mb-2"><button class="btn btn-ghost btn-sm" data-ai="gap_questions">Find missing metrics</button><button class="btn btn-ghost btn-sm" data-ai="draft">Generate first draft</button></div>' : ''}`
-        : '<p class="hint mb-2">AI drafting is not configured on the server. Coaches can write drafts directly.</p>'}
-      ${aiBlock}
-      ${latestAi ? `<button class="link-btn mb-2" data-open="${latestAi.version_id}">View latest AI draft (v${latestAi.version})</button>` : ''}
       <div class="section-label mt-2">Coach edit</div>
       ${editable ? `<form id="draft" novalidate><div class="form-error" hidden></div>
-        <textarea class="input mb-1" name="body_text" rows="12" placeholder="Write or paste the edited draft">${esc(latestEdit?.body_text || latestAi?.body_text || '')}</textarea>
+        <textarea class="input mb-1" name="body_text" rows="12" placeholder="Write or paste the edited draft">${esc(latestEdit?.body_text || '')}</textarea>
         <div class="row"><button class="btn btn-ghost btn-sm" type="submit">Save new version</button>
         ${c.status === 'coach_edit' ? '<button class="btn btn-primary btn-sm" type="button" data-qa-submit>Send to QA</button>' : ''}</div></form>`
         : `${latestEdit ? `<button class="link-btn" data-open="${latestEdit.version_id}">View latest coach edit (v${latestEdit.version})</button>` : '<p class="muted small">No coach edit yet.</p>'}`}
@@ -61,15 +47,6 @@
     ui.el.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => openFile(b.dataset.open)));
     const facts = ui.el.querySelector('#facts');
     if (facts && w.can_edit) onSubmit(facts, async (d) => { await api(`/api/cases/${c.id}/source-facts`, { method: 'PUT', body: d }); toast('Source facts saved'); });
-    ui.el.querySelectorAll('[data-ai]').forEach((b) => b.addEventListener('click', async () => {
-      b.disabled = true; b.textContent = 'Working…';
-      try {
-        await api(`/api/cases/${c.id}/source-facts`, { method: 'PUT', body: { source_facts: facts.source_facts.value } });
-        const r = await api(`/api/cases/${c.id}/ai`, { method: 'POST', body: { purpose: b.dataset.ai } });
-        toast(r.status === 'failed' ? `AI failed: ${r.error}` : 'AI run started — refresh in a moment');
-        setTimeout(reload, 4000);
-      } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = A.label(b.dataset.ai); }
-    }));
     const draft = ui.el.querySelector('#draft');
     if (draft) onSubmit(draft, async (d) => { await api(`/api/cases/${c.id}/drafts`, { method: 'POST', body: d }); toast('New version saved'); reload(); });
     ui.el.querySelector('[data-qa-submit]')?.addEventListener('click', async () => {

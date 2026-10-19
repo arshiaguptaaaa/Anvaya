@@ -2,7 +2,6 @@
 // Case workspace shared by admins and the assigned coach (a mentor). Ops can see status but not drafts.
 const express = require('express');
 const db = require('../db');
-const ai = require('../lib/ai');
 const { HttpError, bad, v, id, wrap } = require('../lib/http');
 
 const r = express.Router();
@@ -32,8 +31,6 @@ r.get('/cases/:id', wrap(async (req, res) => {
       from anvaya.documents d join anvaya.document_versions v on v.document_id = d.id and v.status = 'ready' where d.case_id = $1 order by v.id desc`, [c.id]);
     out.student_resumes = await db.all(`select d.id, d.title, (select max(v.id) from anvaya.document_versions v where v.document_id = d.id and v.status = 'ready') as version_id
       from anvaya.documents d where d.student_id = $1 and d.kind = 'resume_upload' order by d.id desc`, [c.student_id]);
-    out.ai_runs = await db.all('select id, purpose, status, model, output_text, error, created_at, output_document_version_id from anvaya.ai_runs where case_id = $1 order by id desc', [c.id]);
-    out.ai_configured = ai.configured();
   } else {
     out.case.source_facts = undefined;
   }
@@ -45,15 +42,6 @@ r.put('/cases/:id/source-facts', wrap(async (req, res) => {
   if (!canEdit) throw new HttpError(403, 'Only the coach or an admin can edit this case.');
   await db.run('update anvaya.service_cases set source_facts = $1, updated_at = now() where id = $2', [v.str(req.body?.source_facts, { max: 20000, label: 'Source facts' }), c.id]);
   res.json({ ok: true });
-}));
-
-r.post('/cases/:id/ai', wrap(async (req, res) => {
-  const { c, canEdit } = await access(req);
-  if (!canEdit) throw new HttpError(403, 'Only the coach or an admin can run AI on this case.');
-  if (['delivered', 'closed', 'cancelled'].includes(c.status)) throw bad('This case is closed for drafting.');
-  const runId = await ai.requestRun(c.id, v.oneOf(req.body?.purpose || 'gap_questions', ['gap_questions', 'draft'], 'Purpose'), req.auth.user.id);
-  const run = await db.one('select id, status, error from anvaya.ai_runs where id = $1', [runId]);
-  res.status(202).json(run);
 }));
 
 /** Saves a coach-edited text version (the AI draft is never edited in place). */
