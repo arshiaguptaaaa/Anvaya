@@ -70,5 +70,19 @@
         }
       ]
     }
+  ],
+  "redirects": [
+    {
+      "source": "/anvaya-payment.html",
+      "has": [
+        {
+          "type": "query",
+          "key": "plan",
+          "value": "^500$"
+        }
+      ],
+      "destination": "/anvaya-payment.html?plan=500mba",
+      "permanent": false
+    }
   ]
 }
