@@ -7,7 +7,7 @@
   for (const k of ['name', 'phone', 'expertise', 'bio', 'linkedin', 'session_duration', 'meeting_link', 'session_details', 'timezone']) {
     if (me[k] != null && me[k] !== '') form[k].value = me[k];
   }
-  document.getElementById('session_price').value = `${inr(me.session_price)} per session`;
+  document.getElementById('session_price').value = `${inr(me.session_price_paise)} per session`;
   const readSlots = A.availabilityEditor(document.getElementById('slots'), document.getElementById('addSlot'), me.availability);
   onSubmit(form, async (data) => {
     const r = await api('/api/mentor/onboarding', { method: 'POST', body: { ...data, availability: readSlots() } });

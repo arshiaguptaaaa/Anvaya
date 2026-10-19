@@ -12,9 +12,12 @@
     "test": "node --test test/*.test.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:import-sqlite": "node scripts/migrate-sqlite-to-postgres.js",
-    "create-admin": "node src/create-admin.js"
+    "create-admin": "node src/create-admin.js",
+    "vercel-build": "node scripts/db-migrate.js --if-configured"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
+    "@vercel/functions": "^3.10.1",
     "express": "^4.21.2",
     "nodemailer": "^6.9.16",
     "pg": "^8.13.1"

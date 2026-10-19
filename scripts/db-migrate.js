@@ -8,9 +8,16 @@ if (fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
 const { Client } = require('pg');
 
 (async () => {
-  const url = process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL;
-  if (!url || !url.startsWith('postgres')) throw new Error('Set DATABASE_URL (or DATABASE_MIGRATION_URL) to your Supabase Postgres connection string.');
-  const c = new Client({ connectionString: url, ssl: /localhost|127\.0\.0\.1/.test(url) ? false : { rejectUnauthorized: false } });
+  // Migrations need a session-mode connection (port 5432): DDL + multi-statement scripts in one transaction.
+  const url = process.env.DATABASE_MIGRATION_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!url || !url.startsWith('postgres')) {
+    if (process.argv.includes('--if-configured')) { console.log('[migrate] No database configured for this build — skipping.'); return; }
+    throw new Error('Set DATABASE_MIGRATION_URL (session pooler, port 5432) to your Supabase Postgres connection string.');
+  }
+  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production' && !process.env.ALLOW_PREVIEW_MIGRATIONS) {
+    console.log(`[migrate] ${process.env.VERCEL_ENV} build — skipping (production data is migrated only by production builds).`); return;
+  }
+  const c = new Client({ connectionString: url.replace(':6543/', ':5432/'), ssl: /localhost|127\.0\.0\.1/.test(url) ? false : { rejectUnauthorized: false } });
   await c.connect();
   await c.query('create table if not exists public.anvaya_migrations (name text primary key, applied_at timestamptz not null default now())');
   await c.query('alter table public.anvaya_migrations enable row level security');

@@ -72,13 +72,14 @@ async function loadSession(req, _res, next) {
     req.auth = null;
     const token = req.cookies[COOKIE_NAME];
     if (token && token.length < 100) {
-      const row = await db.one(`select s.id as sid, s.csrf_token, s.expires_at, u.id, u.email, u.role
+      const row = await db.one(`select s.id as sid, s.csrf_token, s.expires_at, u.id, u.email, u.role, u.name, u.disabled_at
         from anvaya.sessions s join anvaya.users u on u.id = s.user_id where s.token_hash = $1`, [sha256(token)]);
-      if (row && new Date(row.expires_at) > new Date()) {
+      if (row && new Date(row.expires_at) > new Date() && !row.disabled_at) {
         const mentor = row.role === 'mentor' ? await db.one('select * from anvaya.mentors where user_id = $1', [row.id]) : null;
+        const student = row.role === 'student' ? await db.one('select * from anvaya.students where user_id = $1', [row.id]) : null;
         // A deactivated mentor's session is dead even if the cookie lingers.
-        if (!(mentor && mentor.status === 'deactivated')) {
-          req.auth = { user: { id: row.id, email: row.email, role: row.role }, mentor, csrf: row.csrf_token };
+        if (!(mentor && mentor.status === 'deactivated') && !(row.role === 'student' && !student)) {
+          req.auth = { user: { id: row.id, email: row.email, role: row.role, name: row.name }, mentor, student, csrf: row.csrf_token };
         }
       } else if (row) {
         await db.run('delete from anvaya.sessions where id = $1', [row.sid]);
@@ -89,10 +90,10 @@ async function loadSession(req, _res, next) {
 }
 
 // ── Guards (backend is the source of truth for permissions) ───────────
-function requireRole(role) {
+function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.auth) return res.status(401).json({ error: 'Please sign in.' });
-    if (req.auth.user.role !== role) return res.status(403).json({ error: 'You do not have access to this area.' });
+    if (!roles.includes(req.auth.user.role)) return res.status(403).json({ error: 'You do not have access to this area.' });
     next();
   };
 }

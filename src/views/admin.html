@@ -7,7 +7,7 @@
 <link rel="icon" href="/assets/logo.png">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app/app.css">
-<title>Anvaya — Admin dashboard</title>
+<title>Anvaya — Admin</title>
 </head>
 <body>
 <div class="grid-bg"></div>
@@ -18,24 +18,35 @@
     <div class="side-label">CRM</div>
     <nav><ul class="nav">
         <li><button data-tab="overview">Overview</button></li>
-        <li><button data-tab="leads">Leads <span class="count" id="c-leads" hidden></span></button></li>
+        <li><button data-tab="followups">Follow-ups <span class=count id=c-followups hidden></span></button></li>
+        <li><button data-tab="leads">Leads <span class=count id=c-leads hidden></span></button></li>
         <li><button data-tab="students">Students</button></li>
-        <li><button data-tab="mentors">Mentors <span class="count" id="c-mentors" hidden></span></button></li>
-        <li><button data-tab="bookings">Bookings</button></li>
-        <li><button data-tab="payments">Payments</button></li>
-        <li><button data-tab="account">Account</button></li>
+        <li><button data-tab="mentors">Mentors <span class=count id=c-mentors hidden></span></button></li>
+        <li><button data-tab="groups">Groups</button></li>
+        <li><button data-tab="calendar">Calendar</button></li>
+        <li><button data-tab="syllabus">Syllabus</button></li>
+        <li><button data-tab="services">Resume services <span class=count id=c-services hidden></span></button></li>
+        <li><button data-tab="subscriptions">Subscriptions</button></li>
+        <li data-role=admin><button data-tab="catalog">Plans &amp; products</button></li>
+        <li data-role=admin><button data-tab="payments">Payments</button></li>
+        <li data-role=admin><button data-tab="payables">Mentor payables</button></li>
+        <li><button data-tab="cohorts">Colleges &amp; cohorts</button></li>
+        <li><button data-tab="reports">Reports</button></li>
+        <li data-role=admin><button data-tab="team">Team</button></li>
+        <li data-role=admin><button data-tab="settings">Settings</button></li>
+        <li data-role=admin><button data-tab="system">System <span class=count id=c-system hidden></span></button></li>
     </ul></nav>
     <div class="side-foot">
       <div class="who" id="who"></div>
-      <div class="who-role">Admin</div>
+      <div class="who-role" id="who-role">Admin</div>
       <button class="btn btn-ghost btn-sm btn-block" data-logout>Sign out</button>
     </div>
   </aside>
   <main class="main" id="main"><p class="sub">Loading…</p></main>
 </div>
 <script src="/app/core.js"></script>
-
 <script src="/app/availability.js"></script>
+<script src="/app/casework.js"></script>
 <script src="/app/admin.js"></script>
 </body>
 </html>

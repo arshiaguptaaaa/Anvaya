@@ -1,7 +1,7 @@
 'use strict';
 // Vercel serverless entry: dashboards, invitations and APIs. The public brochure and
 // /app, /assets files are served straight from public/ by Vercel's CDN.
-if (!process.env.DATABASE_URL) {
+if (!process.env.DATABASE_URL && !process.env.POSTGRES_URL) {
   module.exports = (req, res) => {
     res.statusCode = 503;
     if (req.url.startsWith('/api/')) {

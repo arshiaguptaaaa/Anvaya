@@ -4,6 +4,6 @@ data/
 !.env.example
 node_modules/
 test/
-scripts/
 .claude/
 .admin-credentials
+docs/

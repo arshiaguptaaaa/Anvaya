@@ -20,13 +20,15 @@
         <li><button data-tab="overview">Overview</button></li>
         <li><button data-tab="sessions">Sessions</button></li>
         <li><button data-tab="students">My students</button></li>
+        <li><button data-tab="groups">Groups</button></li>
+        <li><button data-tab="reviews">Review tasks <span class=count id=c-reviews hidden></span></button></li>
         <li><button data-tab="earnings">Earnings</button></li>
         <li><button data-tab="availability">Availability</button></li>
         <li><button data-tab="profile">Profile</button></li>
     </ul></nav>
     <div class="side-foot">
       <div class="who" id="who"></div>
-      <div class="who-role">Mentor</div>
+      <div class="who-role" id="who-role">Mentor</div>
       <button class="btn btn-ghost btn-sm btn-block" data-logout>Sign out</button>
     </div>
   </aside>
@@ -34,6 +36,7 @@
 </div>
 <script src="/app/core.js"></script>
 <script src="/app/availability.js"></script>
+<script src="/app/casework.js"></script>
 <script src="/app/mentor.js"></script>
 </body>
 </html>
