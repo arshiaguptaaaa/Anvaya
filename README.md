@@ -1,4 +1,21 @@
-# Anvaya — site, admin CRM and mentor dashboard
+# Anvaya — career preparation platform
+
+Live at **https://anvayacareers.in**. One Vercel app + Supabase (Postgres + private storage) + Resend + Razorpay.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (architecture, audit, schema, costs) and [docs/SETUP.md](docs/SETUP.md) (exact production setup).
+
+| Area | URL | Roles |
+| --- | --- | --- |
+| Public brochure | `/` | everyone (original page + one lead-capture script tag) |
+| Admin & CRM | `/admin` | `admin` (everything), `ops` (scheduling, reminders, attendance, follow-ups) |
+| Mentor dashboard | `/mentor` | `mentor` (own students, groups, sessions, reviews, ledger) |
+| Student dashboard | `/student` | `student` (own plan, syllabus, sessions, services, outcomes) |
+| Links | `/invite`, `/reset` | single-use, expiring account links |
+
+Tests: `npm test` (27 end-to-end journeys + permission checks on in-process Postgres).
+Local dev: `.env` with `DATABASE_URL=pglite://data/pg`, `MAIL_TRANSPORT=memory`, `STORAGE_DRIVER=memory`, then `npm start`.
+
+---
+
 
 The public brochure (`public/index.html`) is served **byte-for-byte unchanged** (same SHA-256 as the supplied `anvaya-brochure (15).html`). Everything new lives on separate routes and uses the same navy / gold / ivory tokens, Cormorant Garamond + DM Sans, grid background and noise overlay.
 

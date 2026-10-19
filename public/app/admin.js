@@ -7,6 +7,14 @@
   document.getElementById('who').textContent = me.user.email;
   document.getElementById('who-role').textContent = isAdmin ? 'Admin' : 'Operations';
   if (!isAdmin) document.querySelectorAll('[data-role="admin"]').forEach((el) => el.remove());
+  const pwLink = document.createElement('button');
+  pwLink.className = 'link-btn mb-1'; pwLink.textContent = 'Change password';
+  pwLink.addEventListener('click', async () => {
+    await formModal({ eyebrow: 'Security', title: 'Change <em>password</em>', fields: [{ name: 'current', label: 'Current password', type: 'password', required: true }, { name: 'next', label: 'New password (10+ characters, letters and numbers)', type: 'password', required: true }],
+      onSave: (b) => api('/api/auth/change-password', { method: 'POST', body: b }) });
+    await loadMe(); toast('Password updated — other devices were signed out');
+  });
+  document.querySelector('.side-foot [data-logout]').before(pwLink);
 
   const cache = {};
   const get = async (k, url) => (cache[k] = await api(url));
