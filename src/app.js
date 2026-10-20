@@ -1,5 +1,5 @@
 'use strict';
-// Express app shared by local dev (src/server.js) and Vercel (api/index.js).
+// Express app shared by the standalone server (src/server.js: local dev, Hostinger) and Vercel (api/index.js).
 const path = require('node:path');
 const express = require('express');
 const db = require('./db');
@@ -34,7 +34,8 @@ function seedAdmin() {
 
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', process.env.TRUST_PROXY || (process.env.VERCEL ? 1 : false));
+// Behind one reverse proxy in production (Vercel's edge, Hostinger's web server): trust exactly one hop for client IP + HTTPS.
+app.set('trust proxy', process.env.TRUST_PROXY ? (Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY) : (process.env.VERCEL || IS_PROD ? 1 : false));
 app.use(sec.parseCookies);
 
 // Machine endpoints need the raw body (webhook signatures) and no session/CSRF.
@@ -116,11 +117,11 @@ app.use('/api/mentor', require('./routes/mentor'));
 app.use('/api/student', require('./routes/student'));
 storage.memoryRoutes(app, express);
 
-// ── Local dev only: static files + public page (Vercel serves public/ directly) ─
+// ── Standalone server only: public/ files (on Vercel the CDN serves public/ and vercel.json does the same) ─
 if (!process.env.VERCEL) {
-  app.use('/app', express.static(path.join(PUBLIC, 'app'), { index: false }));
-  app.use('/assets', express.static(path.join(PUBLIC, 'assets')));
-  app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC, 'index.html')));
+  app.get('/anvaya-payment.html', (req, res, next) => (req.query.plan === '500' ? res.redirect(302, '/anvaya-payment.html?plan=500mba') : next()));
+  app.use('/app', (_req, res, next) => { res.set({ 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' }); next(); });
+  app.use(express.static(PUBLIC, { index: 'index.html', dotfiles: 'ignore', redirect: false }));
 }
 
 // ── Errors ────────────────────────────────────────────────────────────
