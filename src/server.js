@@ -5,6 +5,12 @@ const path = require('node:path');
 const ENV_FILE = path.join(__dirname, '..', '.env');
 if (fs.existsSync(ENV_FILE) && !process.env.SKIP_DOTENV) process.loadEnvFile(ENV_FILE);
 
+// Long-running hosts (Hostinger) may start this file directly instead of `npm start`, so pending
+// database migrations run here before the app loads. Skipped when no Postgres URL is configured.
+if (process.env.NODE_ENV === 'production' && !process.env.VERCEL && process.env.MIGRATE_ON_START !== 'false') {
+  require('node:child_process').execFileSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'db-migrate.js'), '--if-configured'], { stdio: 'inherit' });
+}
+
 const app = require('./app');
 const mailer = require('./mailer');
 const PORT = Number(process.env.PORT || 3000);

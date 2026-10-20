@@ -4,18 +4,18 @@ Supabase (database + private files), Resend (email) and Razorpay stay exactly as
 **anvayacareers.in keeps pointing at Vercel until the Hostinger copy passes every check in step 5.**
 
 ## 0. What changed in the code
-* `npm start` runs pending database migrations, then starts `src/server.js` (a normal Node server).
+* `src/server.js` is a normal Node server. In production it applies pending database migrations before starting.
 * The server serves `public/` itself (brochure, payment page, `/app`, `/assets`) and repeats Vercel's `?plan=500` redirect.
 * Built-in scheduler: every 5 minutes it queues 24 h / 2 h session reminders, renewal reminders and retries, then sends
   due emails. A Hostinger cron job (step 4) hits `/api/cron/run` as a second trigger in case the app was asleep.
 * Vercel keeps working unchanged, so you can switch back at any time.
 
-## 1. Create the Node.js app (hPanel)
-Websites → **Add website** → **Node.js app** (on some accounts: Websites → Manage → Advanced → **Node.js**).
-* Source: **upload** `hostinger-upload.zip` (built from this folder; no secrets inside), or connect GitHub once the repo exists.
-* Node version: **22** (anything ≥ 20.12 works).
-* Install/build command: `npm install --omit=dev`  Start command: `npm start`  Entry file (if asked): `src/server.js`
-* Leave the domain as Hostinger's **temporary domain** for now. Do not attach anvayacareers.in yet.
+## 1. Create the Node.js app (needs Business web hosting or any Cloud plan; Single/Premium can't run Node.js apps)
+Websites → **Create Website** → **Web App** → **Upload .zip** (or **Import Git repository** once the GitHub repo exists).
+* Upload `hostinger-upload.zip` (built from this folder; no secrets inside).
+* Framework: **Other** (Express). Node version: **22.x**. Entry file: `src/server.js`. No output directory, no build script.
+* Leave it on Hostinger's **temporary domain**. Do not attach anvayacareers.in yet. (Hostinger: a domain's existing
+  website must be removed before a Node.js app can use it, and Node.js apps have no Stop button; removing one is permanent.)
 
 ## 2. Environment variables (hPanel → the app → Environment variables)
 Type the values there yourself. Never paste them into chat.

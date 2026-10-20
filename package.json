@@ -8,15 +8,14 @@
     "node": ">=20.12"
   },
   "scripts": {
-    "start": "node scripts/db-migrate.js --if-configured && node src/server.js",
+    "start": "node src/server.js",
     "test": "node --test test/*.test.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:import-sqlite": "node scripts/migrate-sqlite-to-postgres.js",
     "create-admin": "node src/create-admin.js",
     "vercel-build": "node scripts/db-migrate.js --if-configured",
     "backup": "node scripts/backup.js",
-    "backup:verify": "node scripts/restore-check.js",
-    "dev": "node src/server.js"
+    "backup:verify": "node scripts/restore-check.js"
   },
   "dependencies": {
     "@vercel/functions": "^3.10.1",
