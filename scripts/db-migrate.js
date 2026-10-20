@@ -24,6 +24,7 @@ const { Client } = require('pg');
   const conn = cleanPgUrl(url);
   const c = new Client({ connectionString: conn, ssl: sslFor(conn) }); // verified TLS
   await c.connect();
+  await c.query('select pg_advisory_lock(728374619)'); // one migrator at a time; released when the connection closes
   await c.query('create table if not exists public.anvaya_migrations (name text primary key, applied_at timestamptz not null default now())');
   await c.query('alter table public.anvaya_migrations enable row level security');
   await c.query('revoke all on public.anvaya_migrations from anon, authenticated');

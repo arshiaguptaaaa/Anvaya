@@ -1,0 +1,13 @@
+node_modules
+.env
+.env.*
+.admin-credentials
+.vercel
+data
+backups
+test
+docs
+*.zip
+hostinger-site
+.git
+.gitignore

@@ -14,7 +14,7 @@ const sheetHits = [];
 Object.assign(process.env, {
   DATABASE_URL: 'pglite://memory', MAIL_TRANSPORT: 'memory', RESEND_API_KEY: '', SMTP_HOST: '', STORAGE_DRIVER: 'memory',
   SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '', JOBS_AUTORUN: 'false',
-  PORT: String(PORT), APP_BASE_URL: `http://localhost:${PORT}`, CRON_SECRET: 'cron-test-secret',
+  PORT: String(PORT), APP_BASE_URL: `http://localhost:${PORT}`, CRON_SECRET: 'cron-test-secret', EXTRA_ORIGINS: 'https://anvayacareers.in',
   ADMIN_EMAIL: 'admin@anvaya.test', ADMIN_PASSWORD: 'Admin-pass-2026',
   RAZORPAY_KEY_ID: 'rzp_fake_test', RAZORPAY_KEY_SECRET: 'rzp-secret', RAZORPAY_WEBHOOK_SECRET: 'whsec-test',
   GOOGLE_SHEET_WEBHOOK_URL: `http://localhost:${SHEET_PORT}/exec`,
@@ -110,6 +110,21 @@ test('dashboards are locked when signed out; CSRF enforced', async () => {
 });
 
 // ═══ Leads: website → CRM (source of truth) → Google Sheet (tracked) ═══
+test('split setup: brochure on another origin can post leads (CORS for allowed origins only)', async () => {
+  const pre = (origin) => fetch(`${BASE}/api/public/leads`, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' } });
+  const ok = await pre('https://anvayacareers.in');
+  assert.equal(ok.status, 204);
+  assert.equal(ok.headers.get('access-control-allow-origin'), 'https://anvayacareers.in');
+  assert.equal((await pre('https://evil.example')).status, 403);
+  const post = (origin) => fetch(`${BASE}/api/public/leads`, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'CORS Test', phone: '9876500000' }) });
+  const r = await post('https://anvayacareers.in');
+  assert.equal(r.status, 201);
+  assert.equal(r.headers.get('access-control-allow-origin'), 'https://anvayacareers.in');
+  const bad = await post('https://evil.example');
+  assert.equal(bad.status, 403);
+  assert.equal(bad.headers.get('access-control-allow-origin'), null);
+});
+
 test('website enquiry lands in the CRM and syncs to the Google Sheet; failures are visible and retryable', async () => {
   const anon = new Client();
   const r = await anon.post('/api/public/leads', { name: 'Meera Joshi', phone: '+91 91234 56789', situation: 'Applying but not hearing back' });

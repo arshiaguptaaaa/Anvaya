@@ -119,6 +119,9 @@ storage.memoryRoutes(app, express);
 
 // ── Standalone server only: public/ files (on Vercel the CDN serves public/ and vercel.json does the same) ─
 if (!process.env.VERCEL) {
+  // Split setup: the brochure and payment page live on the main site (PUBLIC_SITE_URL); this host only runs the app.
+  const SITE = (process.env.PUBLIC_SITE_URL || '').replace(/\/$/, '');
+  if (SITE) app.get(['/', '/index.html', '/anvaya-payment.html'], (req, res) => res.redirect(302, SITE + req.originalUrl.replace(/^\/index\.html/, '/')));
   app.get('/anvaya-payment.html', (req, res, next) => (req.query.plan === '500' ? res.redirect(302, '/anvaya-payment.html?plan=500mba') : next()));
   app.use('/app', (_req, res, next) => { res.set({ 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' }); next(); });
   app.use(express.static(PUBLIC, { index: 'index.html', dotfiles: 'ignore', redirect: false }));

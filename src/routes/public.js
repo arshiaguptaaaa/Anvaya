@@ -28,10 +28,21 @@ jobs.register('leads.sheet_sync', async ({ leadId }) => {
   }
 });
 
+const allowedOrigins = () => [BASE_URL(), ...(process.env.EXTRA_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean)];
+// The brochure may live on another origin (split setup: anvayacareers.in → app.anvayacareers.in), so this one
+// endpoint answers CORS for the configured origins only. No cookies are involved (credentials: 'omit').
+r.use('/public/leads', (req, res, next) => {
+  const origin = req.get('origin');
+  if (origin && allowedOrigins().includes(origin)) res.set({ 'Access-Control-Allow-Origin': origin, Vary: 'Origin' });
+  if (req.method !== 'OPTIONS') return next();
+  if (!origin || !allowedOrigins().includes(origin)) return res.status(403).end();
+  res.set({ 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' }).status(204).end();
+});
+
 const leadLimiter = sec.rateLimiter({ name: 'lead', windowMs: 60 * 60e3, max: 10, key: (req) => req.ip });
 r.post('/public/leads', leadLimiter, wrap(async (req, res) => {
   const origin = req.get('origin');
-  const allowed = [BASE_URL(), ...(process.env.EXTRA_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean)];
+  const allowed = allowedOrigins();
   if (origin && !allowed.includes(origin) && !(!IS_PROD && /^http:\/\/localhost(:\d+)?$/.test(origin))) throw new HttpError(403, 'Forbidden.');
   const b = req.body || {};
   if (b.website) return res.status(201).json({ ok: true }); // honeypot

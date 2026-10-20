@@ -18,7 +18,8 @@ app.listen(PORT, () => console.log(`Anvaya running on port ${PORT}  (mail: ${mai
 
 // Built-in scheduler for long-running hosts: queues 24h/2h session reminders, renewals and retries every 5 minutes,
 // then drains the job queue. The host's cron job (GET /api/cron/run) is a second trigger in case the process was asleep.
-const every = Number(process.env.SCHEDULER_MINUTES ?? (process.env.NODE_ENV === 'production' ? 5 : 0));
+// Cloud Run (K_SERVICE) gives no CPU between requests, so there the host's cron ping is the only trigger.
+const every = Number(process.env.SCHEDULER_MINUTES ?? (process.env.NODE_ENV === 'production' && !process.env.K_SERVICE ? 5 : 0));
 if (every > 0 && (process.env.DATABASE_URL || process.env.POSTGRES_URL)) {
   const { schedulePeriodic } = require('./lib/maintenance');
   const jobs = require('./lib/jobs');

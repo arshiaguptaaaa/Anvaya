@@ -1,4 +1,7 @@
-# Moving Anvaya from Vercel to Hostinger
+# Moving Anvaya from Vercel to Hostinger (Business plan option)
+
+> Chosen route is the **split setup** in [SPLIT-SETUP.md](SPLIT-SETUP.md) (Hostinger Single + Cloud Run). This file
+> applies only if you later upgrade Hostinger to Business/Cloud and move the whole app there.
 
 Supabase (database + private files), Resend (email) and Razorpay stay exactly as they are; only the web server moves.
 **anvayacareers.in keeps pointing at Vercel until the Hostinger copy passes every check in step 5.**
