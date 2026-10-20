@@ -2,11 +2,15 @@
 # Adds secret variables to the Cloud Run service with a MERGE-ONLY update (existing variables are kept).
 # Values are typed with hidden input, never echoed, never passed on a command line, and the temporary
 # file holding them is private (0600) and deleted on exit. Nothing is printed except variable NAMES.
-#   bash scripts/cloudrun-set-secrets.sh
+#   bash scripts/cloudrun-set-secrets.sh                  (all four)
+#   bash scripts/cloudrun-set-secrets.sh RESEND_API_KEY   (only the names given)
 set -euo pipefail
 G="${GCLOUD:-$HOME/google-cloud-sdk/bin/gcloud}"
 PROJECT=zinc-reason-491008-d0 REGION=us-east1 SERVICE=anvaya
-NAMES=(DATABASE_URL SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY RESEND_API_KEY)
+ALLOWED=" DATABASE_URL SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY RESEND_API_KEY "
+if [ $# -gt 0 ]; then NAMES=("$@"); else NAMES=(DATABASE_URL SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY RESEND_API_KEY); fi
+for N in "${NAMES[@]}"; do [[ "$ALLOWED" == *" $N "* ]] || { echo "Unknown variable: $N"; exit 1; }; done
+echo "Will update ONLY: ${NAMES[*]} (every other variable is kept as is)"
 
 echo "Account: $("$G" config get-value account 2>/dev/null)   Project: $PROJECT   Service: $SERVICE ($REGION)"
 LATEST=$("$G" run services describe $SERVICE --project $PROJECT --region $REGION --format='value(status.latestReadyRevisionName)')
@@ -39,13 +43,13 @@ done
 unset VAL
 
 # JSON is valid YAML; python escapes quotes/backslashes safely. Values travel via environment, not argv.
-python3 - "$TMP" <<'PY'
+NAMES_CSV=$(IFS=,; echo "${NAMES[*]}") python3 - "$TMP" <<'PY'
 import json, os, sys
-names = ["DATABASE_URL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "RESEND_API_KEY"]
+names = os.environ["NAMES_CSV"].split(",")
 with open(sys.argv[1], "w") as f:
     json.dump({"--update-env-vars": {n: os.environ["V_" + n] for n in names}}, f)
 PY
-unset V_DATABASE_URL V_SUPABASE_URL V_SUPABASE_SERVICE_ROLE_KEY V_RESEND_API_KEY
+for N in "${NAMES[@]}"; do unset "V_$N"; done
 
 echo; echo "Applying merge-only update…"
 "$G" run services update $SERVICE --project $PROJECT --region $REGION --flags-file="$TMP" --quiet 2>&1 | grep -E "Service \[|ERROR|failed" || true
