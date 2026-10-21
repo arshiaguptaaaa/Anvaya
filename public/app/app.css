@@ -361,6 +361,7 @@ a.link-btn { text-decoration:none; }
 .avatar { width:42px; height:42px; border-radius:50%; display:grid; place-items:center; background:var(--gold-2); color:var(--navy); font-weight:600; font-size:14px; flex-shrink:0; }
 .list li.col { flex-direction:column; align-items:stretch; }
 .thread { list-style:none; margin:8px 0; display:flex; flex-direction:column; gap:8px; }
-.thread li { border-left:2px solid var(--gold-border); padding:2px 0 2px 12px; font-size:13px; white-space:pre-wrap; }
+.list .thread li, .thread li { display:block; border-left:2px solid var(--gold-border); border-bottom:none; padding:2px 0 2px 12px; font-size:13px; white-space:pre-wrap; }
 @media (max-width:1000px) { .home-grid { grid-template-columns:minmax(0,1fr); } .ms-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width:560px) { .ms-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .next-card .btn { width:100%; justify-content:center; } .m-grid { grid-template-columns:minmax(0,1fr); } }
+.pre-line { white-space:pre-line; }

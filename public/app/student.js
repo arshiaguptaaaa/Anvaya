@@ -67,7 +67,7 @@
               || `<li class="muted small">Nothing booked yet.${sub ? ' <a href="#sessions">Book your check-up</a> or <a href="#mentors">find a mentor</a>.' : ''}</li>`}</ul>
             <p class="small muted pad">You can reschedule or cancel online until shortly before a session; after that, message the Anvaya team.</p></div>
           <div class="card reveal"><div class="card-head"><h2 class="h2">Syllabus &amp; <em>progress</em></h2><a class="link-btn" href="#learn">Open syllabus →</a></div>
-            <div class="pad"><div class="meter"><i style="width:${pct}%"></i></div><p class="small muted mt-1">${h.progress.total ? `${h.progress.done} of ${h.progress.total} assignments submitted (${pct}%)` : 'Your syllabus appears once you’re enrolled in a track.'}</p></div></div>
+            <div class="pad"><div class="meter"><i data-pct="${pct}"></i></div><p class="small muted mt-1">${h.progress.total ? `${h.progress.done} of ${h.progress.total} assignments submitted (${pct}%)` : 'Your syllabus appears once you’re enrolled in a track.'}</p></div></div>
           <div class="card reveal"><div class="card-head"><h2 class="h2">Messages from <em>Anvaya</em></h2><a class="link-btn" href="#support">Support →</a></div>
             <ul class="list small">${msgs.filter((m) => m.author_role !== 'student').slice(0, 3).map((m) => `<li><span>${esc(m.body)}<span class="sub-line">${esc(m.author)} · ${esc(dt(m.created_at))}</span></span></li>`).join('') || '<li class="muted">No messages yet.</li>'}</ul></div>
         </div>
@@ -84,6 +84,7 @@
           <div class="card card-pad reveal"><div class="section-label">Support requests</div>
             <ul class="list tight small">${h.support.map((c) => `<li><span>${esc(c.subject)}<span class="sub-line">${esc(dt(c.updated_at))}</span></span>${statusPill(c.status)}</li>`).join('') || '<li class="muted">None. <a href="#support">Raise a request</a> if you need help.</li>'}</ul></div>
         </div></div>`;
+    main.querySelectorAll('[data-pct]').forEach((el) => { el.style.width = `${Number(el.dataset.pct)}%`; }); // CSSOM, allowed by the strict CSP
     bindSessionActions(main);
   }
   function bindSessionActions(root) {
@@ -126,7 +127,7 @@
   }
   function profile(m) {
     const ui = modal(`<div class="eyebrow">Mentor</div><h2 class="h2 mb-1">${esc(m.name)}</h2><p class="small muted mb-2">${esc(m.headline || m.expertise)}${m.years_experience != null ? ` · ${m.years_experience} years’ experience` : ''}${m.target_roles ? ` · Prepares for ${esc(m.target_roles)}` : ''}</p>
-      <p class="small mb-2" style="white-space:pre-line">${esc(m.bio || '')}</p><div class="section-label">1. Choose a service</div>
+      <p class="small mb-2 pre-line">${esc(m.bio || '')}</p><div class="section-label">1. Choose a service</div>
       <ul class="list tight">${m.services.map((x) => `<li><span><strong class="ivory">${esc(x.title)}</strong><span class="sub-line">${x.duration_min} min${x.description ? ` · ${esc(x.description)}` : ''}</span></span>
         <span class="row"><span class="strong">${inr(x.price_paise)}</span><button class="btn btn-primary btn-sm" data-svc="${x.id}">Choose</button></span></li>`).join('')}</ul>
       <p class="hint">Steps: service → time → a few questions → payment → confirmation.</p>`, { wide: true });
