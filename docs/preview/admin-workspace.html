@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin Workspace Preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="preview.css">
+<style>
+.ws{display:grid;grid-template-columns:230px 300px minmax(0,1fr) 320px;height:calc(100vh - 92px)}
+.ws>*{overflow:auto;border-right:1px solid var(--line)}
+.ws>*:last-child{border-right:0}
+.nav{background:var(--navy-2);padding:14px 10px}
+.nav .sec{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin:14px 10px 6px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:8px;color:var(--ivory-2);font-size:13.5px}
+.nav a:hover{background:var(--navy-3)}
+.nav a.on{background:var(--gold-dim);color:var(--gold-2)}
+.nav a .n{font-size:11.5px;color:var(--muted)}
+.nav a .n.alert{color:var(--red)}
+.queue{background:var(--navy)}
+.qhead{padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--navy);z-index:2}
+.qhead .filters{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.item{display:block;padding:12px 14px;border-bottom:1px solid var(--line);color:inherit}
+.item.on{background:var(--navy-3);box-shadow:inset 3px 0 0 var(--gold)}
+.item .t{color:var(--ivory);font-weight:500}
+.item .due{font-size:11.5px}
+.center{background:var(--navy)}
+.rec-head{padding:16px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--navy);z-index:2}
+.rec-head h1{font:400 26px 'Cormorant Garamond',serif}
+.tabs{display:flex;gap:18px;margin-top:12px;font-size:13px}
+.tabs a{color:var(--muted);padding-bottom:6px}
+.tabs a.on{color:var(--gold-2);border-bottom:2px solid var(--gold)}
+.timeline{padding:16px 22px 0}
+.ev{display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;margin-bottom:14px}
+.ev .bubble{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--navy-2)}
+.ev.internal .bubble{background:rgba(233,183,101,.06);border:1px dashed rgba(233,183,101,.45)}
+.ev.visible .bubble{background:rgba(143,184,232,.06);border-color:rgba(143,184,232,.35)}
+.ev.system .bubble{background:transparent;border-style:dotted}
+.ev .meta{font-size:11.5px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:4px}
+.sysico{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;color:var(--muted);font-size:13px}
+.composer{position:sticky;bottom:0;background:var(--navy-2);border-top:1px solid var(--line);padding:12px 22px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.seg button{background:transparent;border:0;color:var(--muted);padding:6px 12px;font-size:12.5px}
+.seg button.on{background:var(--amber-dim);color:var(--amber)}
+.seg button.on.vis{background:var(--blue-dim);color:var(--blue)}
+textarea{width:100%;margin-top:8px;background:var(--navy-3);border:1px solid var(--line);border-radius:9px;color:var(--ivory);padding:10px;font:inherit;min-height:64px;resize:vertical}
+.ctx{background:var(--navy-2);padding:14px;display:flex;flex-direction:column;gap:12px}
+.ent{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:12.5px;margin-top:6px}
+.tasks li{display:flex;gap:10px;align-items:flex-start}
+.tasks input{margin-top:4px;accent-color:var(--gold)}
+@media (max-width:1280px){.ws{grid-template-columns:200px 270px minmax(0,1fr) 290px}}
+@media (max-width:1100px){.ws{grid-template-columns:240px minmax(0,1fr);height:auto}.nav{display:none}.ctx{grid-column:1 / -1}}
+@media (max-width:760px){.ws{display:block;height:auto}.ws>*{overflow:visible;border-right:0}.composer{position:static}.rec-head .between{align-items:flex-start}.ctx{padding:16px}.queue{max-height:none}.queue .item:nth-child(n+5){display:none}.rec-head h1{font-size:22px}.timeline,.rec-head,.composer{padding-left:16px;padding-right:16px}.topbar .search{display:none}}
+</style>
+</head>
+<body>
+<div class="demo-banner"><b>DEMO DATA</b> · Synthetic design preview, not real Anvaya records. Every person, payment and message below is invented.</div>
+<header class="topbar">
+  <div class="brand"><div class="mark">A</div><span class="name">Anvaya</span></div>
+  <div class="search" role="search">⌕ Search students, leads, phone, email, college… <kbd>/</kbd></div>
+  <span class="chip amber" title="Restricted operations role">Ops intern view: finance &amp; account admin hidden</span>
+  <div class="avatar alt" aria-label="Signed in as Ops">OP</div>
+</header>
+
+<main class="ws">
+  <!-- LEFT: navigation + saved queues -->
+  <nav class="nav" aria-label="Workspace">
+    <a href="#" >Today <span class="n">9</span></a>
+    <a href="#">Leads <span class="n">24</span></a>
+    <a href="#" class="on">Students <span class="n">61</span></a>
+    <a href="#">Support <span class="n">5</span></a>
+    <a href="#">Sessions</a>
+    <a href="#">Mentors</a>
+    <div class="sec">Queues</div>
+    <a href="#">My tasks <span class="n">6</span></a>
+    <a href="#">Unassigned <span class="n">3</span></a>
+    <a href="#" class="on">Follow-ups due <span class="n alert">4</span></a>
+    <a href="#">Awaiting student <span class="n">2</span></a>
+    <a href="#">Awaiting mentor <span class="n">1</span></a>
+    <a href="#">Payment exceptions <span class="n alert">1</span></a>
+    <a href="#">Renewals (14 days) <span class="n">3</span></a>
+    <div class="sec">Health</div>
+    <a href="#">Incomplete onboarding <span class="n">2</span></a>
+    <a href="#">Missed sessions <span class="n">1</span></a>
+    <a href="#">Failed jobs <span class="n">0</span></a>
+  </nav>
+
+  <!-- QUEUE LIST -->
+  <section class="queue" aria-label="Follow-ups due">
+    <div class="qhead">
+      <div class="between"><span class="strong">Follow-ups due</span><span class="tiny muted">sorted by due date</span></div>
+      <div class="filters"><span class="chip gold">Owner: me</span><span class="chip">Track: any</span><span class="chip">Stage: any</span></div>
+    </div>
+    <a class="item on" href="#"><div class="between"><span class="t">Ishita Rao</span><span class="due" style="color:var(--red)">overdue 1d</span></div>
+      <div class="small muted">Student · PM track · Check-up prep</div><div class="tiny">Next: confirm resume v3 uploaded</div></a>
+    <a class="item" href="#"><div class="between"><span class="t">Kabir Menon</span><span class="due muted">today 5 pm</span></div>
+      <div class="small muted">Lead · Free-chat · Contacted</div><div class="tiny">Next: call back about plans</div></a>
+    <a class="item" href="#"><div class="between"><span class="t">Tanvi Joshi</span><span class="due muted">today</span></div>
+      <div class="small muted">Support · “Can I move my check-up?”</div><div class="tiny">Awaiting reply from Anvaya</div></a>
+    <a class="item" href="#"><div class="between"><span class="t">Aditya Kulkarni</span><span class="due muted">tomorrow</span></div>
+      <div class="small muted">Student · Renewal in 6 days</div><div class="tiny">Next: share renewal options</div></a>
+    <a class="item" href="#"><div class="between"><span class="t">Meera Pillai</span><span class="due muted">Fri</span></div>
+      <div class="small muted">Lead · Instagram · New</div><div class="tiny">Unassigned</div></a>
+  </section>
+
+  <!-- CENTRE: unified record -->
+  <section class="center" aria-label="Student record">
+    <div class="rec-head">
+      <div class="between">
+        <div class="row"><div class="avatar lg">IR</div>
+          <div><h1>Ishita Rao</h1>
+            <div class="row" style="flex-wrap:wrap;gap:6px"><span class="chip gold">Student</span><span class="chip">Stage: Training</span><span class="chip green"><span class="dot"></span>Plan active</span><span class="chip">Owner: Ops (you)</span></div></div></div>
+        <div class="row"><button class="btn ghost sm">Assign ▾</button><button class="btn ghost sm">Status ▾</button><button class="btn primary sm">+ Task</button></div>
+      </div>
+      <div class="tabs"><a class="on" href="#">Activity</a><a href="#">Tasks (2)</a><a href="#">Sessions</a><a href="#">Progress</a><a href="#">Files</a><a href="#">Support (1)</a></div>
+    </div>
+    <div class="timeline">
+      <div class="ev system"><div class="sysico">⟳</div><div class="bubble"><div class="meta">System · Today 09:05</div>Reminder queued for <span class="strong">Check-up with Dev S., Thu 6:30 pm</span> (24 h and 2 h). Will be cancelled automatically if the session moves.</div></div>
+      <div class="ev internal"><div class="avatar alt">OP</div><div class="bubble"><div class="meta"><span class="strong">Ops (you)</span><span class="chip amber">Internal note: staff only</span>Yesterday 18:20</div>Called: she has a new internship bullet but hasn’t uploaded v3. Prefers WhatsApp in the evening.</div></div>
+      <div class="ev visible"><div class="avatar alt2">DS</div><div class="bubble"><div class="meta"><span class="strong">Dev S. (mentor)</span><span class="chip blue">Visible to student</span>Yesterday 11:02 · <span class="chip green">Email delivered (Resend)</span></div>Before Thursday, please add metrics to your top three bullets: users, %, time saved.</div></div>
+      <div class="ev system"><div class="sysico">₹</div><div class="bubble"><div class="meta">System · 12 Oct 14:31</div>Payment <span class="strong">verified by Razorpay webhook</span> · Growth plan · order activated · confirmation email delivered · onboarding started.</div></div>
+      <div class="ev visible"><div class="avatar alt">OP</div><div class="bubble"><div class="meta"><span class="strong">Ops</span><span class="chip blue">Visible to student</span>10 Oct · <span class="chip">Shown in portal only: WhatsApp not connected</span></div>Welcome! Your intake is complete. We’ve placed you in the PM Evening group.</div></div>
+      <div class="ev system"><div class="sysico">✓</div><div class="bubble"><div class="meta">System · 9 Oct</div>Lead converted to student from <span class="strong">Free 15-min chat (website)</span>.</div></div>
+    </div>
+    <div class="composer">
+      <div class="between"><div class="seg" role="tablist" aria-label="Note type"><button class="on" aria-selected="true">Internal note</button><button class="vis">Message to student</button></div>
+        <span class="tiny muted">Internal notes are never shown to students or mentors.</span></div>
+      <textarea aria-label="Write an internal note" placeholder="Add an internal note… (@mention a teammate)"></textarea>
+      <div class="between" style="margin-top:8px"><div class="row tiny muted">Status after save: <span class="chip">Awaiting student</span> · Follow-up: <span class="chip">Fri 11 am</span></div><button class="btn primary sm">Save note</button></div>
+    </div>
+  </section>
+
+  <!-- RIGHT: context -->
+  <aside class="ctx" aria-label="Student context">
+    <div class="card"><h3>Profile</h3>
+      <dl class="kv"><dt>College</dt><dd>Demo Institute of Management</dd><dt>Target role</dt><dd>Associate Product Manager</dd><dt>Track</dt><dd>Product Management</dd><dt>Phone</dt><dd>+91 9•••• ••210</dd><dt>Source</dt><dd>Free-chat (website)</dd></dl></div>
+    <div class="card"><h3>Subscription &amp; payments</h3>
+      <div class="between"><span class="strong">Growth plan</span><span class="chip green">Active</span></div>
+      <div class="small muted">Valid till 18 Nov · renews manually</div>
+      <div class="small" style="margin-top:6px">Last payment <span class="strong">12 Oct</span> · <span class="chip green">Verified · Razorpay</span></div>
+      <div class="ent"><span>Included check-ups</span><span class="strong">1 of 2 left</span><span>Live classes</span><span class="strong">3 of 4 left</span><span>Mentor rooms</span><span class="strong">4 of 4 left</span></div>
+      <div class="tiny muted" style="margin-top:6px">Paid mentor sessions are billed separately and never use these allowances.</div></div>
+    <div class="card"><h3>Mentor &amp; group</h3>
+      <div class="row"><div class="avatar alt2">DS</div><div><div class="strong">Dev S.</div><div class="small muted">Group mentor · PM Evening (8/12)</div></div></div></div>
+    <div class="card"><h3>Next up</h3>
+      <div class="strong">Check-up with Dev S.</div><div class="small muted">Thu 6:30 pm IST · 30 min · Included check-up</div>
+      <div class="small" style="margin-top:8px">Next action: <span class="strong">Confirm resume v3 uploaded</span> · <span style="color:var(--red)">due yesterday</span></div></div>
+    <div class="card"><h3>Open tasks</h3>
+      <ul class="list tasks"><li><input type="checkbox" aria-label="Done"><div><div class="strong small">Confirm resume v3 uploaded</div><div class="tiny muted">Ops (you) · due yesterday</div></div></li>
+      <li><input type="checkbox" aria-label="Done"><div><div class="strong small">Share mock-interview slot</div><div class="tiny muted">Unassigned · due Mon</div></div></li></ul></div>
+  </aside>
+</main>
+</body>
+</html>

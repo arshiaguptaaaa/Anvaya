@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Student Home Preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="preview.css">
+<style>
+.wrap{max-width:1180px;margin:0 auto;padding:22px 20px 60px}
+.hello{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.hello h1{font:400 34px/1.1 'Cormorant Garamond',serif}
+.hello h1 em{color:var(--gold-2)}
+.next{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:center;padding:22px;border-radius:16px;
+  background:linear-gradient(135deg,rgba(201,168,76,.16),rgba(201,168,76,.04));border:1px solid var(--gold-border);margin-bottom:18px}
+.next .lbl{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold)}
+.next h2{font:400 26px/1.2 'Cormorant Garamond',serif;margin:4px 0}
+.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:6px}
+.step{padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--navy-2);font-size:12.5px}
+.step .s{font-size:11px;margin-top:2px}
+.step.done{border-color:rgba(109,212,168,.35)} .step.done .s{color:var(--green)}
+.step.now{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset} .step.now .s{color:var(--gold-2)}
+.step.todo .s{color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px;margin-top:16px}
+.col{display:flex;flex-direction:column;gap:16px}
+.sess{display:grid;grid-template-columns:62px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.sess:last-child{border-bottom:0}
+.date{text-align:center;border:1px solid var(--line);border-radius:10px;padding:6px 0;line-height:1.1}
+.date b{display:block;font:400 22px 'Cormorant Garamond',serif;color:var(--ivory)}
+.date span{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.inc{display:grid;grid-template-columns:1fr auto;gap:8px 12px;font-size:13px;align-items:center}
+.mentor{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.mentor:last-child{border-bottom:0}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.ticket{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.ticket:last-child{border-bottom:0}
+.topnav{display:flex;gap:18px;font-size:13.5px}
+.topnav a{color:var(--muted)} .topnav a.on{color:var(--gold-2)}
+@media (max-width:980px){.grid{grid-template-columns:minmax(0,1fr)}.steps{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:600px){.wrap{padding:16px}.next{grid-template-columns:minmax(0,1fr)}.next .btn{width:100%;justify-content:center}
+  .steps{grid-template-columns:repeat(2,minmax(0,1fr))}.sess{grid-template-columns:52px minmax(0,1fr)}.sess .acts{grid-column:1 / -1;justify-content:flex-start}
+  .topnav{display:none}.hello h1{font-size:28px}}
+</style>
+</head>
+<body>
+<div class="demo-banner"><b>DEMO DATA</b> · Synthetic design preview. The student, mentors, sessions and plan shown here are invented.</div>
+<header class="topbar">
+  <div class="brand"><div class="mark">A</div><span class="name">Anvaya</span></div>
+  <nav class="topnav" aria-label="Student"><a class="on" href="#">Home</a><a href="#">Sessions</a><a href="#">Syllabus</a><a href="#">Mentors</a><a href="#">Support</a></nav>
+  <span style="margin-left:auto" class="avatar">IR</span>
+</header>
+
+<main class="wrap">
+  <div class="hello">
+    <div><div class="tiny muted" style="letter-spacing:.2em;text-transform:uppercase">Product Management track</div><h1>Good evening, <em>Ishita</em></h1></div>
+    <div class="row"><span class="chip green"><span class="dot"></span>Payment verified · 12 Oct</span><span class="chip gold">Growth plan · valid till 18 Nov</span></div>
+  </div>
+
+  <!-- 1. Next action -->
+  <section class="next" aria-label="What to do next">
+    <div><div class="lbl">Your next step</div>
+      <h2>Upload your updated resume before Thursday’s check-up</h2>
+      <div class="small">Dev asked for metrics on your top three bullets. Upload <span class="strong">resume v3</span> so he can review it before <span class="strong">Thu 6:30 pm</span>.</div></div>
+    <button class="btn primary">Upload resume →</button>
+  </section>
+
+  <!-- 2. Milestones -->
+  <section aria-label="Preparation milestones">
+    <div class="between" style="margin-bottom:8px"><span class="strong">Preparation</span><span class="small muted">4 of 6 milestones · payment shown separately above</span></div>
+    <div class="steps">
+      <div class="step done">Intake<div class="s">✓ Done 9 Oct</div></div>
+      <div class="step done">Assessment<div class="s">✓ Done 11 Oct</div></div>
+      <div class="step done">Group<div class="s">✓ PM Evening</div></div>
+      <div class="step now">Training<div class="s">In progress · 4/9 modules</div></div>
+      <div class="step todo">Check-up<div class="s">Booked · Thu</div></div>
+      <div class="step todo">Progress review<div class="s">After check-up</div></div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <div class="col">
+      <!-- 3. Upcoming sessions -->
+      <section class="card" aria-label="Upcoming sessions"><div class="between"><h3>Upcoming sessions</h3><a class="small" href="#">All sessions</a></div>
+        <div class="sess"><div class="date"><b>23</b><span>Thu</span></div>
+          <div><div class="strong">Resume check-up with Dev S.</div><div class="small muted">6:30–7:00 pm IST · Google Meet</div><span class="chip gold tiny">Included check-up · 1 of 2 this month</span></div>
+          <div class="acts"><button class="btn sm" disabled title="Opens 10 minutes before">Join</button><button class="btn ghost sm">Reschedule</button><button class="btn ghost sm">Cancel</button></div></div>
+        <div class="sess"><div class="date"><b>25</b><span>Sat</span></div>
+          <div><div class="strong">PM Evening: product sense live class</div><div class="small muted">11:00 am–12:30 pm IST · group room</div><span class="chip tiny">Live class · 3 of 4 left</span></div>
+          <div class="acts"><button class="btn sm" disabled>Join</button><button class="btn ghost sm">Can’t attend</button></div></div>
+        <div class="sess"><div class="date"><b>28</b><span>Tue</span></div>
+          <div><div class="strong">Mock interview with Rhea K.</div><div class="small muted">8:00–8:45 pm IST</div><span class="chip blue tiny">Paid session · paid separately, verified</span></div>
+          <div class="acts"><button class="btn sm" disabled>Join</button><button class="btn ghost sm">Reschedule</button><button class="btn ghost sm">Cancel</button></div></div>
+        <div class="tiny muted" style="margin-top:8px">Reschedule or cancel up to 12 hours before. After that, message the Anvaya team.</div>
+      </section>
+
+      <!-- 5. Syllabus, assignments, feedback -->
+      <section class="card" aria-label="Syllabus and assignments"><div class="between"><h3>Syllabus &amp; assignments</h3><span class="small muted">44% complete</span></div>
+        <div class="meter" style="margin-bottom:12px"><i style="width:44%"></i></div>
+        <ul class="list small">
+          <li class="between"><span><span class="strong">Week 4 · Rewrite 3 bullets with metrics</span><br><span class="muted">Due Thu · submitted, awaiting feedback</span></span><span class="chip amber">Submitted</span></li>
+          <li class="between"><span><span class="strong">Week 3 · Product teardown</span><br><span class="muted">Feedback from Dev: “Strong structure; quantify impact.”</span></span><span class="chip green">Reviewed</span></li>
+          <li class="between"><span><span class="strong">Week 5 · Estimation practice</span><br><span class="muted">Unlocks Mon · 2 resources</span></span><span class="chip">Upcoming</span></li>
+        </ul></section>
+
+      <!-- 6. Mentor discovery -->
+      <section class="card" aria-label="Find a mentor"><div class="between"><h3>Find a mentor</h3><a class="small" href="#">Browse all</a></div>
+        <div class="filters"><span class="chip gold">Expertise: Product</span><span class="chip">Target role: APM</span><span class="chip">Price: any</span><span class="chip">Available this week</span></div>
+        <div class="mentor"><div class="avatar alt2">RK</div><div><div class="strong">Rhea K. <span class="tiny muted">· demo profile</span></div><div class="small muted">Senior PM · 7 yrs · Mock interviews, resume reviews</div><div class="tiny">Next slot: Mon 7:30 pm</div></div><div style="text-align:right"><div class="strong">₹ — </div><button class="btn ghost sm">View</button></div></div>
+        <div class="mentor"><div class="avatar alt">AN</div><div><div class="strong">Arnav N. <span class="tiny muted">· demo profile</span></div><div class="small muted">Consulting → Product · 5 yrs · Case prep</div><div class="tiny">Next slot: Wed 6:00 pm</div></div><div style="text-align:right"><div class="strong">₹ — </div><button class="btn ghost sm">View</button></div></div>
+        <div class="tiny muted" style="margin-top:6px">Booking: service → slot → a few questions → payment → confirmation. Prices come from each mentor’s live profile.</div>
+      </section>
+    </div>
+
+    <div class="col">
+      <!-- 4. Subscription -->
+      <section class="card" aria-label="What your plan includes"><h3>Your plan includes</h3>
+        <div class="between" style="margin-bottom:8px"><span class="strong">Growth plan</span><span class="chip green">Active till 18 Nov</span></div>
+        <div class="inc"><span>Check-up calls</span><span class="strong">1 of 2 left</span><span>Live classes</span><span class="strong">3 of 4 left</span><span>Mentor rooms</span><span class="strong">4 of 4 left</span><span>Syllabus &amp; tracking</span><span class="strong">Included</span><span>Community group</span><span class="strong">Included</span></div>
+        <div class="tiny muted" style="margin-top:8px">Allowances reset on the 1st. Paid mentor sessions are separate and don’t use them.</div></section>
+
+      <!-- Who can help -->
+      <section class="card" aria-label="Who can help"><h3>Who can help</h3>
+        <div class="mentor"><div class="avatar alt2">DS</div><div><div class="strong">Dev S.</div><div class="small muted">Your group mentor · PM Evening</div></div><button class="btn ghost sm">Profile</button></div>
+        <div class="mentor"><div class="avatar">AT</div><div><div class="strong">Anvaya team</div><div class="small muted">Usually replies within a working day</div></div><button class="btn ghost sm">Ask</button></div>
+        <div class="mentor"><div class="avatar alt">WA</div><div><div class="strong">PM Evening community</div><div class="small muted">WhatsApp group link from your plan</div></div><button class="btn ghost sm">Open</button></div></section>
+
+      <!-- 9. Support -->
+      <section class="card" aria-label="Support requests"><div class="between"><h3>Support requests</h3><button class="btn ghost sm">+ New</button></div>
+        <div class="ticket"><span><span class="strong">Can I move my check-up?</span><br><span class="tiny muted">You · yesterday → Anvaya replied 2 h later</span></span><span class="chip blue">Answered</span></div>
+        <div class="ticket"><span><span class="strong">Invoice for October</span><br><span class="tiny muted">You · 14 Oct</span></span><span class="chip green">Resolved</span></div></section>
+
+      <section class="card" aria-label="Progress"><h3>Progress review</h3>
+        <div class="small">Your mentor’s next review is after Thursday’s check-up. You’ll see their notes here when they share them with you.</div></section>
+    </div>
+  </div>
+</main>
+</body>
+</html>

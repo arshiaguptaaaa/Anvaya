@@ -1,0 +1,60 @@
+/* Design preview only (demo data). Same tokens as public/app/app.css. */
+:root {
+  --navy:#08111f; --navy-2:#0d1b2e; --navy-3:#112238; --navy-4:#16304d;
+  --gold:#c9a84c; --gold-2:#e8c97a; --gold-dim:rgba(201,168,76,.10); --gold-border:rgba(201,168,76,.22);
+  --ivory:#f4ede0; --ivory-2:#d9cdb8; --muted:#8f8370; --line:rgba(201,168,76,.16);
+  --green:#6dd4a8; --green-dim:rgba(109,212,168,.12); --red:#e28b7a; --red-dim:rgba(226,139,122,.12);
+  --blue:#8fb8e8; --blue-dim:rgba(143,184,232,.12); --amber:#e9b765; --amber-dim:rgba(233,183,101,.12);
+  --r:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--navy);color:var(--ivory-2);font:300 14px/1.6 'DM Sans',system-ui,sans-serif;min-height:100vh}
+a{color:var(--gold);text-decoration:none}
+button{font:inherit;cursor:pointer}
+.serif{font-family:'Cormorant Garamond',Georgia,serif}
+h1,h2,h3{color:var(--ivory);font-weight:400}
+.demo-banner{position:sticky;top:0;z-index:50;background:repeating-linear-gradient(135deg,#3a2b0c 0 12px,#2e2209 12px 24px);color:var(--gold-2);
+  text-align:center;font-size:12px;letter-spacing:.08em;padding:6px 16px;border-bottom:1px solid var(--gold-border)}
+.demo-banner b{font-weight:600}
+.topbar{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--navy-2)}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--gold),#8a6f2a);display:grid;place-items:center;color:var(--navy);font:600 15px 'Cormorant Garamond',serif}
+.brand .name{font:400 18px 'Cormorant Garamond',serif;letter-spacing:.2em;color:var(--ivory);text-transform:uppercase}
+.search{flex:1;max-width:520px;display:flex;align-items:center;gap:8px;background:var(--navy-3);border:1px solid var(--line);border-radius:10px;padding:7px 12px;color:var(--muted)}
+.search kbd{margin-left:auto;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:0 6px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--ivory-2);white-space:nowrap}
+.chip.gold{background:var(--gold-dim);border-color:var(--gold-border);color:var(--gold-2)}
+.chip.green{background:var(--green-dim);border-color:transparent;color:var(--green)}
+.chip.red{background:var(--red-dim);border-color:transparent;color:var(--red)}
+.chip.blue{background:var(--blue-dim);border-color:transparent;color:var(--blue)}
+.chip.amber{background:var(--amber-dim);border-color:transparent;color:var(--amber)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:600;font-size:12px;color:var(--navy);background:var(--gold-2);flex-shrink:0}
+.avatar.lg{width:56px;height:56px;font-size:18px}
+.avatar.alt{background:#a9c7e6}.avatar.alt2{background:#b9e3cf}
+.card{background:var(--navy-2);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.card h3{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);font-weight:500;margin-bottom:10px}
+.muted{color:var(--muted)} .small{font-size:12.5px} .tiny{font-size:11.5px}
+.strong{color:var(--ivory);font-weight:500}
+.btn{display:inline-flex;align-items:center;gap:6px;border-radius:9px;padding:7px 13px;font-size:13px;border:1px solid var(--gold-border);background:transparent;color:var(--ivory-2)}
+.btn.primary{background:var(--gold);color:var(--navy);border-color:var(--gold);font-weight:600}
+.btn.ghost:hover{border-color:var(--gold);color:var(--gold)}
+.btn.sm{padding:4px 10px;font-size:12px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:10px;align-items:center}
+.between{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}
+.kv dt{color:var(--muted)} .kv dd{color:var(--ivory)}
+.meter{height:6px;background:var(--navy-4);border-radius:99px;overflow:hidden}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-2))}
+.list{list-style:none}
+.list li{padding:9px 0;border-bottom:1px solid var(--line)}
+.list li:last-child{border-bottom:0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.btn{white-space:nowrap}
+.card,.col,.grid>*{min-width:0}
+@media (max-width:760px){
+  .chip{white-space:normal}
+  .topbar{flex-wrap:wrap}
+  .between{flex-wrap:wrap}
+}
