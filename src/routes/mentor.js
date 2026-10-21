@@ -29,6 +29,10 @@ const profileFields = fields({
   phone: (x) => v.str(x, { max: 40, label: 'Phone' }),
   linkedin: (x) => v.url(x, 'LinkedIn URL'),
   timezone: (x) => v.str(x, { max: 60, label: 'Time zone' }) || 'Asia/Kolkata',
+  headline: (x) => v.str(x, { max: 160, label: 'Headline' }),
+  years_experience: (x) => v.int(x, { min: 0, max: 60, label: 'Years of experience' }),
+  target_roles: (x) => v.str(x, { max: 300, label: 'Roles you prepare students for' }),
+  buffer_minutes: (x) => v.int(x, { min: 0, max: 120, label: 'Buffer between sessions' }) ?? 0,
 });
 function parseAvailability(list) {
   if (!Array.isArray(list)) throw bad('Availability must be a list.');
@@ -119,9 +123,55 @@ async function ownBooking(req) {
 }
 r.patch('/bookings/:id', wrap(async (req, res) => {
   const b = await ownBooking(req);
-  const notes = v.str(req.body?.session_notes, { max: 10000, label: 'Session notes' });
-  await db.run('update anvaya.bookings set session_notes = $1 where id = $2 and mentor_id = $3', [notes, b.id, req.auth.mentor.id]);
+  const notes = req.body?.session_notes !== undefined ? v.str(req.body.session_notes, { max: 10000, label: 'Session notes' }) : b.session_notes;
+  // private = only this mentor · staff = mentor + Anvaya team · student = also shown to the student
+  const vis = req.body?.notes_visibility !== undefined ? v.oneOf(req.body.notes_visibility, ['private', 'staff', 'student'], 'Who can see the notes') : b.notes_visibility;
+  await db.run('update anvaya.bookings set session_notes = $1, notes_visibility = $2 where id = $3 and mentor_id = $4', [notes, vis, b.id, req.auth.mentor.id]);
   res.json({ ok: true });
+}));
+
+// ── Services (each new or edited service needs admin approval before students can book it) ──
+const serviceFields = fields({
+  title: (x) => v.str(x, { max: 120, required: true, label: 'Service name' }),
+  description: (x) => v.str(x, { max: 2000, label: 'Description' }),
+  duration_min: (x) => v.int(x, { min: 15, max: 240, required: true, label: 'Duration (minutes)' }),
+  price_paise: (x) => v.paise(x, { required: true, label: 'Price' }),
+  active: (x) => v.bool(x),
+  intake_questions: (x) => {
+    const list = Array.isArray(x) ? x.slice(0, 8) : [];
+    return JSON.stringify(list.map((q, i) => ({ id: `q${i + 1}`, label: v.str(q?.label, { max: 200, required: true, label: 'Question' }), required: v.bool(q?.required) })));
+  },
+}, ['title', 'duration_min', 'price_paise']);
+r.get('/services', wrap(async (req, res) => {
+  res.json(await db.all('select * from anvaya.mentor_services where mentor_id = $1 order by active desc, id', [req.auth.mentor.id]));
+}));
+r.post('/services', wrap(async (req, res) => {
+  const f = await serviceFields(req.body || {}, { partial: false });
+  const row = await db.one(`insert into anvaya.mentor_services (mentor_id, title, description, duration_min, price_paise, intake_questions, active)
+    values ($1,$2,$3,$4,$5,coalesce($6::jsonb,'[]'),coalesce($7, true)) returning id`,
+  [req.auth.mentor.id, f.title, f.description || '', f.duration_min, f.price_paise, f.intake_questions ?? null, f.active ?? null]);
+  db.audit(req.auth.user.id, 'mentor_service_submitted', `service:${row.id}`);
+  res.status(201).json({ id: row.id, approval: 'pending' });
+}));
+r.patch('/services/:id', wrap(async (req, res) => {
+  const s = await db.one('select * from anvaya.mentor_services where id = $1 and mentor_id = $2', [id(req), req.auth.mentor.id]);
+  if (!s) throw new HttpError(404, 'Service not found.');
+  const f = await serviceFields(req.body || {}, { partial: true });
+  const keys = Object.keys(f);
+  if (!keys.length) return res.json({ ok: true });
+  const needsApproval = keys.some((k) => ['title', 'description', 'duration_min', 'price_paise', 'intake_questions'].includes(k));
+  await db.run(`update anvaya.mentor_services set ${keys.map((k, i) => `${k} = $${i + 2}${k === 'intake_questions' ? '::jsonb' : ''}`).join(', ')},
+      updated_at = now() ${needsApproval ? ", approval = 'pending', approved_by = null, approved_at = null" : ''} where id = $1`, [s.id, ...keys.map((k) => f[k])]);
+  res.json({ ok: true, approval: needsApproval ? 'pending' : s.approval });
+}));
+r.get('/agenda', wrap(async (req, res) => {
+  const mid = req.auth.mentor.id;
+  res.json(await db.all(`select * from (
+      select 'booking' as type, b.id, b.service as title, b.scheduled_at as starts_at, b.ends_at, b.status, b.kind, s.name as student_name, b.intake_answers
+        from anvaya.bookings b join anvaya.students s on s.id = b.student_id where b.mentor_id = $1 and b.status in ('scheduled','requested') and b.ends_at > now() - interval '1 hour'
+      union all select 'live', l.id, l.title, l.starts_at, l.ends_at, l.status, l.kind, g.name, '{}'::jsonb
+        from anvaya.live_sessions l left join anvaya.mentor_groups g on g.id = l.group_id where l.mentor_id = $1 and l.status = 'scheduled' and l.ends_at > now() - interval '1 hour'
+    ) x where starts_at < now() + interval '14 days' order by starts_at`, [mid]));
 }));
 r.post('/bookings/:id/complete', wrap(async (req, res) => {
   const b = await ownBooking(req);

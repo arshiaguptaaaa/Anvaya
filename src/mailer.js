@@ -104,6 +104,35 @@ const templates = {
     }),
     text: `Confirmed: ${d.service} with ${d.mentorName} on ${ist(d.startsAt)} (${d.duration} min). ${d.meetLink || ''}\n`,
   }),
+  staff_message: (d) => ({
+    subject: d.subject ? `Anvaya: ${d.subject}` : 'A message from the Anvaya team',
+    html: layout({
+      heading: `A message from ${em('Anvaya')}`,
+      bodyHtml: `<p style="margin:0 0 12px;white-space:pre-line;">${esc(d.body)}</p><p style="margin:0;color:#7a6e5e;font-size:13px;">From ${esc(d.from || 'the Anvaya team')}. Reply in your dashboard so the whole team can see it.</p>`,
+      ctaUrl: d.dashboardUrl, ctaLabel: 'Open dashboard',
+    }),
+    text: `${d.body}\n\nFrom ${d.from || 'the Anvaya team'}. Reply in your dashboard: ${d.dashboardUrl}\n`,
+  }),
+  payment_confirmed: (d) => ({
+    subject: `Payment received: ${d.item}`,
+    html: layout({
+      heading: `You’re ${em('all set')}`,
+      bodyHtml: `<p style="margin:0 0 12px;">We’ve received your payment for ${strong(esc(d.item))}${d.validTill ? `. Your access runs until ${strong(esc(ist(d.validTill, { dateStyle: 'medium' })))}` : ''}.</p>${d.setupUrl ? `<p style="margin:0 0 12px;">Next: set up your account and complete a short intake so we can match you to a group and mentor.</p>` : `<p style="margin:0 0 12px;">Next: ${esc(d.nextStep || 'open your dashboard to see what’s included.')}</p>`}`,
+      ctaUrl: d.setupUrl || d.dashboardUrl, ctaLabel: d.setupUrl ? 'Set up your account' : 'Open dashboard',
+    }),
+    text: `Payment received for ${d.item}.${d.validTill ? ` Access until ${ist(d.validTill, { dateStyle: 'medium' })}.` : ''} ${d.setupUrl ? `Set up your account: ${d.setupUrl}` : `Open your dashboard: ${d.dashboardUrl}`}\n`,
+  }),
+  session_changed: (d) => ({
+    subject: d.cancelled ? `Cancelled: ${d.title}` : `Moved: ${d.title} → ${ist(d.startsAt)}`,
+    html: layout({
+      heading: d.cancelled ? `Session ${em('cancelled')}` : `Session ${em('moved')}`,
+      bodyHtml: d.cancelled
+        ? `<p style="margin:0;">${strong(esc(d.title))} on ${esc(ist(d.previousAt))} has been cancelled.${d.reason ? ` ${esc(d.reason)}` : ''}</p>`
+        : `<p style="margin:0;">${strong(esc(d.title))} now starts ${strong(esc(ist(d.startsAt)))} (was ${esc(ist(d.previousAt))}).</p>`,
+      ctaUrl: d.dashboardUrl, ctaLabel: 'Open dashboard',
+    }),
+    text: d.cancelled ? `Cancelled: ${d.title} on ${ist(d.previousAt)}.` : `Moved: ${d.title} now starts ${ist(d.startsAt)} (was ${ist(d.previousAt)}).\n`,
+  }),
   session_reminder: (d) => ({
     subject: `Reminder: ${d.title} — ${ist(d.startsAt)}`,
     html: layout({

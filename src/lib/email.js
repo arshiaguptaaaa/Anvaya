@@ -6,7 +6,12 @@ const mailer = require('../mailer');
 
 jobs.register('email.send', async ({ to, template, data }) => {
   const msg = mailer.render(template, data);
-  return mailer.send({ to, ...msg });
+  const out = await mailer.send({ to, ...msg });
+  // Timeline messages record their real delivery result (also when a retry succeeds later).
+  if (data && data.__entryId) {
+    await require('../db').run("update anvaya.record_entries set email_status = 'delivered', email_error = '' where id = $1", [data.__entryId]);
+  }
+  return out;
 });
 
 /**

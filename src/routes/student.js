@@ -2,6 +2,7 @@
 // Student API — every query is scoped to req.auth.student.id.
 const express = require('express');
 const db = require('../db');
+const ops = require('../lib/ops');
 const sec = require('../security');
 const subs = require('../lib/subscriptions');
 const bookingsLib = require('../lib/bookings');
@@ -126,11 +127,32 @@ r.get('/sessions', wrap(async (req, res) => {
     from anvaya.bookings b left join anvaya.mentors m on m.id = b.mentor_id where b.student_id = $1 and b.status <> 'cancelled' order by b.scheduled_at desc`, [sid]);
   res.json({ live, bookings, has_access: !!sub });
 }));
-r.get('/mentors', wrap(async (_req, res) => {
-  res.json(await db.all(`select id, name, expertise, bio, session_details, session_duration, session_price_paise, accepts_paid_sessions
-    from anvaya.mentors where status = 'active' order by name`));
+/** Mentor discovery: expertise / target role text filters, max price (approved services only), availability this week. */
+r.get('/mentors', wrap(async (req, res) => {
+  const mentors = await db.all(`select id, name, expertise, bio, headline, years_experience, target_roles, session_details, session_duration,
+      session_price_paise, accepts_paid_sessions, photo_status = 'approved' as has_photo
+    from anvaya.mentors where status = 'active' and not is_test order by name`);
+  const services = await db.all(`select id, mentor_id, title, description, duration_min, price_paise, intake_questions from anvaya.mentor_services
+    where active and approval = 'approved' order by price_paise`);
+  const q = (x) => String(x || '').trim().toLowerCase();
+  const exp = q(req.query.expertise), role = q(req.query.role), maxPrice = req.query.max_price ? Number(req.query.max_price) : null;
+  let out = mentors.map((m) => ({ ...m, services: services.filter((s) => s.mentor_id === m.id) }));
+  if (exp) out = out.filter((m) => `${m.expertise} ${m.headline} ${m.bio}`.toLowerCase().includes(exp));
+  if (role) out = out.filter((m) => `${m.target_roles} ${m.expertise}`.toLowerCase().includes(role));
+  if (maxPrice != null) out = out.filter((m) => m.services.some((s) => Number(s.price_paise) <= maxPrice));
+  if (req.query.available === 'week') {
+    const keep = [];
+    for (const m of out) if ((await bookingsLib.slots(m.id, { days: 7 })).length) keep.push(m);
+    out = keep;
+  }
+  res.json(out);
 }));
-r.get('/mentors/:id/slots', wrap(async (req, res) => res.json(await bookingsLib.slots(id(req)))));
+r.get('/mentors/:id/slots', wrap(async (req, res) => {
+  const sid = v.id(req.query.service_id, 'Service');
+  const svc = sid ? await db.one("select duration_min from anvaya.mentor_services where id = $1 and mentor_id = $2 and active and approval = 'approved'", [sid, id(req)]) : null;
+  if (sid && !svc) throw new HttpError(404, 'Service not found.');
+  res.json(await bookingsLib.slots(id(req), { durationMin: svc?.duration_min || null }));
+}));
 
 r.post('/bookings/checkup', wrap(async (req, res) => {
   const sid = me(req);
@@ -149,7 +171,8 @@ r.post('/bookings/paid', wrap(async (req, res) => {
   const sid = me(req);
   const mode = payments.configured() ? 'razorpay' : 'manual';
   const b = await bookingsLib.create({ studentId: sid, mentorId: v.id(req.body?.mentor_id, 'Mentor', { required: true }),
-    startsAt: v.date(req.body?.scheduled_at, { required: true, label: 'Time' }), kind: 'paid_session', userId: req.auth.user.id, paymentMode: mode });
+    startsAt: v.date(req.body?.scheduled_at, { required: true, label: 'Time' }), kind: 'paid_session', userId: req.auth.user.id, paymentMode: mode,
+    serviceId: v.id(req.body?.service_id, 'Service'), intakeAnswers: req.body?.intake_answers && typeof req.body.intake_answers === 'object' ? req.body.intake_answers : {} });
   let order;
   try {
     order = await payments.createOrder({ studentId: sid, product: null, amountPaise: b.price_paise, description: `Private mentor session #${b.id}`, userId: req.auth.user.id });
@@ -161,17 +184,123 @@ r.post('/bookings/paid', wrap(async (req, res) => {
   res.status(201).json({ booking_id: b.id, status: b.status, hold_expires_at: b.hold_expires_at, checkout: await checkoutFor(req, order) });
 }));
 
+r.post('/bookings/:id/reschedule', wrap(async (req, res) => {
+  const b = await bookingsLib.reschedule({ bookingId: id(req), studentId: me(req), byUserId: req.auth.user.id,
+    startsAt: v.date(req.body?.scheduled_at, { required: true, label: 'New time' }) });
+  ops.notifyBookingChange(b.id, { previousAt: b.previous_at }).catch(() => {});
+  res.json({ ok: true, scheduled_at: b.scheduled_at });
+}));
 r.post('/bookings/:id/cancel', wrap(async (req, res) => {
   const b = await db.one('select * from anvaya.bookings where id = $1 and student_id = $2', [id(req), me(req)]);
   if (!b) throw new HttpError(404, 'Booking not found.');
   if (!['scheduled', 'requested', 'pending_payment'].includes(b.status)) throw bad('This booking can’t be cancelled.');
   const notice = Number(await settings.get('booking_min_notice_hours')) * 3600e3;
   if (b.status === 'scheduled' && new Date(b.scheduled_at).getTime() - Date.now() < notice) throw bad('It’s too close to the session to cancel online. Please message the Anvaya team.');
-  await db.run("update anvaya.bookings set status = 'cancelled', cancelled_at = now(), cancel_reason = 'Cancelled by student' where id = $1", [b.id]);
+  await db.tx(async (t) => {
+    await t.run("update anvaya.bookings set status = 'cancelled', cancelled_at = now(), cancel_reason = 'Cancelled by student' where id = $1", [b.id]);
+    await ops.cancelStaleReminders({ bookingId: b.id }, t);
+    await ops.systemEvent(b.student_id, `Student cancelled “${b.service}” (${new Date(b.scheduled_at).toISOString()}).`, t);
+  });
+  if (b.status === 'scheduled') ops.notifyBookingChange(b.id, { previousAt: b.scheduled_at, cancelled: true }).catch(() => {});
   if (b.kind === 'paid_session' && b.status === 'scheduled') {
     await db.run("update anvaya.students set needs_followup = true, followup_reason = 'Cancelled a paid session — refund or rebook' where id = $1", [b.student_id]);
   }
   res.json({ ok: true, refund: b.kind === 'paid_session' && b.status === 'scheduled' ? 'The Anvaya team will contact you about a refund or a new time.' : null });
+}));
+
+// ── Home: next action, milestones, sessions, plan, progress, who can help ──
+r.get('/home', wrap(async (req, res) => {
+  const sid = me(req);
+  const s = await db.one(`select s.*, t.name as track_name from anvaya.students s left join anvaya.tracks t on t.id = s.track_id where s.id = $1`, [sid]);
+  const all = await subs.forStudent(sid);
+  const sub = all.find((x) => subs.hasAccess(x)) || null;
+  if (sub) for (const e of sub.entitlements) if (e.limit_count != null) Object.assign(e, await subs.usage(sid, sub, e));
+  const payment = sub ? await db.one(`select p.provider, p.paid_at from anvaya.payments p where p.order_id = $1 and p.status = 'paid' order by p.id desc limit 1`, [sub.last_order_id]) : null;
+  const group = await db.one(`select g.id, g.name, g.whatsapp_link, g.meet_link, m.id as mentor_id, m.name as mentor_name, m.headline as mentor_headline
+    from anvaya.group_members gm join anvaya.mentor_groups g on g.id = gm.group_id left join anvaya.mentors m on m.id = g.mentor_id where gm.student_id = $1 and gm.left_at is null`, [sid]);
+  const notice = Number(await settings.get('booking_min_notice_hours')) * 3600e3;
+  const bookings = await db.all(`select b.id, b.kind, b.service, b.scheduled_at, b.ends_at, b.duration, b.status, b.meeting_link, m.name as mentor_name, b.mentor_id,
+      case when b.notes_visibility = 'student' then b.session_notes else null end as shared_notes
+    from anvaya.bookings b left join anvaya.mentors m on m.id = b.mentor_id where b.student_id = $1 and b.status in ('scheduled','requested','pending_payment') and b.ends_at > now()
+    order by b.scheduled_at limit 10`, [sid]);
+  for (const b of bookings) {
+    const far = new Date(b.scheduled_at).getTime() - Date.now() >= notice;
+    b.can_cancel = far || b.status !== 'scheduled'; b.can_reschedule = far && ['scheduled', 'requested'].includes(b.status);
+    b.can_join = !!b.meeting_link && b.status === 'scheduled' && Date.now() >= new Date(b.scheduled_at).getTime() - 10 * 60e3;
+  }
+  const live = sub ? await db.all(`select l.id, l.kind, l.title, l.starts_at, l.ends_at, l.meet_link from anvaya.live_sessions l
+    where l.status = 'scheduled' and l.ends_at > now() and l.group_id in (select group_id from anvaya.group_members where student_id = $1 and left_at is null)
+    order by l.starts_at limit 5`, [sid]) : [];
+  const prog = await db.one(`select count(*) filter (where p.status in ('submitted','reviewed','done')) as done, count(a.id) as total
+    from anvaya.enrollments e join anvaya.modules mo on mo.track_id = e.track_id join anvaya.assignments a on a.module_id = mo.id
+    left join anvaya.assignment_progress p on p.assignment_id = a.id and p.student_id = e.student_id where e.student_id = $1 and e.status = 'active'`, [sid]);
+  const checkups = await db.one(`select count(*) filter (where status = 'completed') as done, count(*) filter (where status = 'scheduled' and ends_at > now()) as booked
+    from anvaya.bookings where student_id = $1 and kind = 'checkup'`, [sid]);
+  const resume = await db.one("select 1 as ok from anvaya.documents where student_id = $1 and kind = 'resume_upload' limit 1", [sid]);
+  const done = Number(prog.done), total = Number(prog.total);
+  const milestones = [
+    { key: 'intake', label: 'Intake', done: !!s.intake_completed_at, at: s.intake_completed_at },
+    { key: 'assessment', label: 'Assessment', done: !!s.assessment_completed_at, at: s.assessment_completed_at },
+    { key: 'group', label: 'Group', done: !!group, detail: group?.name || null },
+    { key: 'training', label: 'Training', done: total > 0 && done >= total, detail: total ? `${done}/${total} assignments` : 'Not started' },
+    { key: 'checkup', label: 'Check-up', done: Number(checkups.done) > 0, detail: Number(checkups.booked) ? 'Booked' : null },
+    { key: 'review', label: 'Progress review', done: !!s.progress_reviewed_at, at: s.progress_reviewed_at },
+  ];
+  const checkupEnt = sub?.entitlements.find((e) => e.key === 'checkup_call');
+  let next;
+  if (!sub) next = { kind: 'plan', title: 'Choose a plan to unlock your preparation', cta: 'See plans', href: '#catalog' };
+  else if (!s.intake_completed_at) next = { kind: 'intake', title: 'Finish your intake so we can match you to a group', cta: 'Complete intake', href: '#intake' };
+  else if (!resume) next = { kind: 'resume', title: 'Upload your resume for your mentor to review', cta: 'Upload resume', href: '#intake' };
+  else if (bookings[0] && new Date(bookings[0].scheduled_at).getTime() - Date.now() < 48 * 3600e3) next = { kind: 'session', title: `Get ready for ${bookings[0].service}`, detail: bookings[0].scheduled_at, cta: 'View session', href: '#sessions' };
+  else if (checkupEnt && (checkupEnt.limit_count == null || checkupEnt.used < checkupEnt.limit_count) && !Number(checkups.booked)) next = { kind: 'checkup', title: 'Book your included check-up call', cta: 'Book check-up', href: '#sessions' };
+  else if (total > done) next = { kind: 'assignment', title: 'Continue your syllabus', detail: `${done} of ${total} assignments done`, cta: 'Open syllabus', href: '#syllabus' };
+  else next = { kind: 'mentor', title: 'Book time with a mentor', cta: 'Find a mentor', href: '#mentors' };
+  const cases = await db.all('select id, subject, status, updated_at from anvaya.support_cases where student_id = $1 order by status = \'resolved\', updated_at desc limit 10', [sid]);
+  res.json({
+    student: { name: s.name, track_name: s.track_name, target_role: s.target_role }, next, milestones,
+    payment: sub ? { status: payment ? 'verified' : 'recorded', provider: payment?.provider || null, paid_at: payment?.paid_at || null } : { status: 'none' },
+    subscription: sub && { plan_name: sub.plan_name, paid_through: sub.paid_through, effective_access: sub.effective_access, entitlements: sub.entitlements },
+    sessions: { bookings, live }, progress: { done, total }, group, support: cases,
+  });
+}));
+
+// ── Messages from the team (only entries marked visible to the student) ──
+r.get('/messages', wrap(async (req, res) => {
+  res.json(await db.all(`select e.id, e.body, e.created_at, e.support_case_id, e.author_role,
+      case when e.author_role = 'student' then 'You' else coalesce(nullif(u.name,''), 'Anvaya team') end as author
+    from anvaya.record_entries e left join anvaya.users u on u.id = e.author_user_id
+    where e.student_id = $1 and e.kind = 'message' order by e.created_at desc limit 100`, [me(req)]));
+}));
+
+// ── Support requests ─────────────────────────────────────────────────
+r.get('/support', wrap(async (req, res) => {
+  const cases = await db.all('select id, subject, category, status, created_at, updated_at from anvaya.support_cases where student_id = $1 order by updated_at desc', [me(req)]);
+  for (const c of cases) {
+    c.history = await db.all(`select e.id, e.body, e.created_at, case when e.author_role = 'student' then 'You' else coalesce(nullif(u.name,''), 'Anvaya team') end as author
+      from anvaya.record_entries e left join anvaya.users u on u.id = e.author_user_id where e.support_case_id = $1 and e.kind = 'message' order by e.created_at`, [c.id]);
+  }
+  res.json(cases);
+}));
+const supportLimiter = sec.rateLimiter({ name: 'support', windowMs: 60 * 60e3, max: 20, key: (req) => `u${req.auth.user.id}` });
+r.post('/support', supportLimiter, wrap(async (req, res) => {
+  const sid = me(req);
+  const subject = v.str(req.body?.subject, { max: 160, required: true, label: 'Subject' });
+  const body = v.str(req.body?.body, { max: 5000, required: true, label: 'Message' });
+  const category = v.oneOf(req.body?.category || 'general', ['general', 'sessions', 'payments', 'technical', 'mentor', 'other'], 'Topic');
+  const s = await db.one('select owner_user_id from anvaya.students where id = $1', [sid]);
+  const c = await db.one(`insert into anvaya.support_cases (student_id, subject, category, created_by, owner_user_id) values ($1,$2,$3,$4,$5) returning id`,
+    [sid, subject, category, req.auth.user.id, s.owner_user_id]);
+  await ops.addEntry({ studentId: sid, caseId: c.id, kind: 'message', body, userId: req.auth.user.id, role: 'student' });
+  await ops.createTask({ title: `Reply to support request: ${subject}`, studentId: sid, caseId: c.id, ownerUserId: s.owner_user_id, dueAt: new Date(Date.now() + 24 * 3600e3).toISOString(), source: 'support', dedupeKey: `support:${c.id}` });
+  res.status(201).json({ id: c.id });
+}));
+r.post('/support/:id/reply', supportLimiter, wrap(async (req, res) => {
+  const c = await db.one('select * from anvaya.support_cases where id = $1 and student_id = $2', [id(req), me(req)]);
+  if (!c) throw new HttpError(404, 'Request not found.');
+  const body = v.str(req.body?.body, { max: 5000, required: true, label: 'Message' });
+  await ops.addEntry({ studentId: c.student_id, caseId: c.id, kind: 'message', body, userId: req.auth.user.id, role: 'student' });
+  await db.run("update anvaya.support_cases set status = 'awaiting_staff', resolved_at = null, updated_at = now() where id = $1", [c.id]);
+  res.json({ ok: true });
 }));
 
 // ── Purchases ────────────────────────────────────────────────────────

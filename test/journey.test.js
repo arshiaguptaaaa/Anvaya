@@ -668,6 +668,199 @@ test('mentors with history cannot be deleted (only deactivated)', async () => {
   assert.equal((await mentorA.req('DELETE', `/api/admin/mentors/${ids.mentorB}`)).status, 403);
 });
 
+// ═══ Operations workspace ═══════════════════════════════════════════════
+const cron = async () => {
+  // Same work the 5-minute scheduler triggers; a fresh reminders run each call (the scheduler dedupes per 5-minute window).
+  assert.equal((await fetch(`${BASE}/api/cron/run`, { headers: { Authorization: 'Bearer cron-test-secret' } })).status, 200);
+  await jobs.runNow(await jobs.enqueue('sessions.reminders', {}));
+  await jobs.processDue({ kinds: ['email.send'], limit: 100 });
+};
+test('workspace: tasks, owners, queues, bulk assign, saved views, paginated tables; ops limits respected', async () => {
+  const staffUsers = (await admin.get('/api/admin/staff-users')).json;
+  const riya = staffUsers.find((u) => u.role === 'ops');
+  assert.ok(riya, 'ops user listed as an owner option');
+  const t = await admin.post('/api/admin/tasks', { title: 'Call about resume v3', student_id: ids.s1, owner_user_id: 'me', due_at: new Date(Date.now() - 3600e3).toISOString() });
+  assert.equal(t.status, 201, t.text);
+  const q = (await admin.get('/api/admin/queues')).json;
+  assert.ok(q.my_tasks >= 1 && q.followups_due >= 1, JSON.stringify(q));
+  assert.ok((await admin.get('/api/admin/queues/my_tasks')).json.some((x) => x.type === 'task' && x.id === t.json.id));
+  assert.equal((await admin.get('/api/admin/queues/nope')).status, 404);
+  assert.ok((await admin.get('/api/admin/today')).json.tasks.some((x) => x.id === t.json.id));
+  assert.equal((await admin.patch(`/api/admin/tasks/${t.json.id}`, { status: 'done' })).status, 200);
+  assert.ok(!(await admin.get('/api/admin/queues/my_tasks')).json.some((x) => x.id === t.json.id));
+  // follow-up + owner on a student, visible in the timeline
+  assert.equal((await ops.patch(`/api/admin/followup/students/${ids.s1}`, { owner_user_id: 'me', next_action: 'Confirm resume v3', follow_up_at: new Date(Date.now() - 60e3).toISOString() })).status, 200);
+  assert.ok((await admin.get('/api/admin/queues/followups_due')).json.some((x) => x.type === 'student' && x.id === ids.s1));
+  // owners must be team members
+  assert.equal((await admin.patch(`/api/admin/followup/students/${ids.s1}`, { owner_user_id: (await db.one("select id from anvaya.users where role = 'mentor' limit 1")).id })).status, 400);
+  // bulk assign leads + filtered, paginated table + saved views
+  for (let i = 0; i < 12; i++) await admin.post('/api/admin/leads', { name: `Bulk lead ${i}`, phone: `98000000${String(i).padStart(2, '0')}`, source: 'Webinar' });
+  const page1 = (await admin.get('/api/admin/leads-table?source=Webinar&page_size=10')).json;
+  assert.equal(page1.rows.length, 10); assert.equal(page1.total, 12);
+  assert.equal((await admin.get('/api/admin/leads-table?source=Webinar&page_size=10&page=2')).json.rows.length, 2);
+  const ids12 = (await admin.get('/api/admin/leads-table?source=Webinar&page_size=50')).json.rows.map((r) => r.id);
+  assert.equal((await admin.post('/api/admin/bulk-assign', { scope: 'leads', ids: Array.from({ length: 101 }, (_, i) => i + 1), owner_user_id: riya.id })).status, 400, 'capped at 100');
+  const ba = await ops.post('/api/admin/bulk-assign', { scope: 'leads', ids: ids12, owner_user_id: riya.id });
+  assert.equal(ba.json.updated, 12);
+  assert.equal((await ops.get('/api/admin/leads-table?owner=me&source=Webinar')).json.total, 12);
+  const sv = await ops.post('/api/admin/views', { scope: 'leads', name: 'My webinar leads', query: { owner: 'me', source: 'Webinar', evil: 'x' } });
+  assert.equal(sv.status, 201);
+  const views = (await ops.get('/api/admin/views?scope=leads')).json;
+  assert.deepEqual(views[0].query, { owner: 'me', source: 'Webinar' });
+  assert.equal((await admin.get('/api/admin/views?scope=leads')).json.length, 0, 'views are per user');
+  assert.equal((await ops.req('DELETE', `/api/admin/views/${sv.json.id}`)).status, 200);
+  const st = (await admin.get(`/api/admin/students-table?q=Rahul&page_size=10`)).json;
+  assert.ok(st.rows.some((r) => r.id === ids.s1 && r.owner_name));
+  // students, mentors and anonymous users stay out
+  for (const c of [stu1, mentorA, new Client()]) {
+    assert.ok([401, 403].includes((await c.get('/api/admin/queues')).status));
+    assert.ok([401, 403].includes((await c.get(`/api/admin/students/${ids.s1}/workspace`)).status));
+  }
+});
+
+test('timeline: internal notes stay internal; messages reach the student with real email status; support requests flow both ways', async () => {
+  assert.equal((await stu1.login('rahul@students.test', 'New-student-pass-2')).status, 200); // an earlier test reset this password
+  const note = await admin.post(`/api/admin/students/${ids.s1}/entries`, { kind: 'internal_note', body: 'Prefers WhatsApp in the evening (INTERNAL)' });
+  assert.equal(note.status, 201); assert.equal(note.json.email, 'not_requested');
+  const msg = await ops.post(`/api/admin/students/${ids.s1}/entries`, { kind: 'message', body: 'Please upload resume v3 before Thursday.', email: true });
+  assert.equal(msg.status, 201); assert.equal(msg.json.email, 'delivered');
+  assert.match(lastEmailTo('rahul@students.test').text, /resume v3 before Thursday/);
+  const quiet = await admin.post(`/api/admin/students/${ids.s1}/entries`, { kind: 'message', body: 'Portal-only note to you.' });
+  assert.equal(quiet.json.email, 'not_requested');
+  const mineRes = await stu1.get('/api/student/messages');
+  assert.equal(mineRes.status, 200, mineRes.text);
+  const mine = mineRes.json;
+  assert.ok(mine.some((m) => m.body.includes('resume v3')) && mine.some((m) => m.body.includes('Portal-only')));
+  assert.ok(!mine.some((m) => m.body.includes('INTERNAL')), 'internal notes never reach the student');
+  assert.ok(!(await stu2.get('/api/student/messages')).json.some((m) => m.body.includes('resume v3')), 'not visible to other students');
+  const ws = (await ops.get(`/api/admin/students/${ids.s1}/workspace`)).json;
+  const kinds = ws.timeline.map((e) => `${e.kind}:${e.email_status}`);
+  assert.ok(kinds.includes('internal_note:not_requested') && kinds.includes('message:delivered') && kinds.includes('message:not_requested'));
+  assert.ok(ws.timeline.some((e) => e.kind === 'system' && /verified by Razorpay/.test(e.body)), 'Razorpay purchase recorded as verified');
+  assert.ok(ws.payments.length && !('amount_paise' in ws.payments[0]), 'ops sees payment status, not amounts');
+  assert.ok(!('notes' in ws.student), 'ops never sees sensitive admin notes');
+  assert.ok('amount_paise' in (await admin.get(`/api/admin/students/${ids.s1}/workspace`)).json.payments[0]);
+  // support request: student → staff → student → staff
+  const sc = await stu1.post('/api/student/support', { subject: 'Can I move my check-up?', body: 'Thursday no longer works.', category: 'sessions' });
+  assert.equal(sc.status, 201, sc.text);
+  assert.ok((await admin.get('/api/admin/queues/awaiting_staff')).json.some((x) => x.id === sc.json.id));
+  assert.ok((await admin.get(`/api/admin/tasks?student_id=${ids.s1}`)).json.some((x) => x.support_case_id === sc.json.id), 'reply task created');
+  assert.equal((await ops.post(`/api/admin/students/${ids.s2}/entries`, { kind: 'message', body: 'x', support_case_id: sc.json.id })).status, 400, 'case belongs to another student');
+  await ops.post(`/api/admin/students/${ids.s1}/entries`, { kind: 'message', body: 'Yes, pick any open slot in Sessions.', support_case_id: sc.json.id, case_status: 'awaiting_student' });
+  let mineCases = (await stu1.get('/api/student/support')).json;
+  assert.equal(mineCases[0].status, 'awaiting_student'); assert.equal(mineCases[0].history.length, 2);
+  assert.equal((await stu2.post(`/api/student/support/${sc.json.id}/reply`, { body: 'hijack' })).status, 404);
+  await stu1.post(`/api/student/support/${sc.json.id}/reply`, { body: 'Thanks, done.' });
+  mineCases = (await stu1.get('/api/student/support')).json;
+  assert.equal(mineCases[0].status, 'awaiting_staff'); assert.equal(mineCases[0].history.length, 3);
+});
+
+test('verified payment → access → confirmation email → onboarding (account invite, task, timeline), exactly once', async () => {
+  const s = await admin.post('/api/admin/students', { name: 'Kavya Nair', email: 'kavya@students.test', phone: '+91 98000 11111' });
+  const o = await admin.post('/api/admin/orders', { student_id: s.json.id, product_id: ids.plan });
+  const before = mailer.sent.length;
+  assert.equal((await admin.post(`/api/admin/orders/${o.json.id}/record-payment`, { method: 'UPI', reference: 'UTR123' })).status, 200);
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  const toKavya = mailer.sent.slice(before).filter((m) => m.to === 'kavya@students.test');
+  assert.ok(toKavya.some((m) => /Payment received/.test(m.subject)), 'payment confirmation sent');
+  assert.ok(toKavya.some((m) => /invite|set up|Set up/i.test(m.subject + m.text) && /token=/.test(m.text)), 'account invitation sent');
+  const ws = (await admin.get(`/api/admin/students/${s.json.id}/workspace`)).json;
+  assert.equal(ws.subscription.effective_access, 'active');
+  assert.ok(ws.student.onboarding_started_at);
+  assert.ok(ws.timeline.some((e) => e.kind === 'system' && /recorded manually by an admin/.test(e.body) && /account invitation sent/.test(e.body)));
+  assert.equal(ws.tasks.filter((x) => /Welcome call/.test(x.title)).length, 1);
+  // repeated callbacks (webhook + browser + reconciliation) must not repeat onboarding
+  await payments.afterPayment(o.json.id, { provider: 'manual' });
+  await payments.afterPayment(o.json.id, { provider: 'manual' });
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  assert.equal(mailer.sent.slice(before).filter((m) => m.to === 'kavya@students.test' && /Payment received/.test(m.subject)).length, 1);
+  assert.equal((await admin.get(`/api/admin/students/${s.json.id}/workspace`)).json.tasks.filter((x) => /Welcome call/.test(x.title)).length, 1);
+  // the new account can sign up from the invite and lands on intake
+  const kc = new Client();
+  const inv = mailer.sent.filter((m) => m.to === 'kavya@students.test' && /token=/.test(m.text)).at(-1);
+  assert.equal((await kc.post('/api/invites/accept', { token: tokenFrom(inv), password: 'Kavya-pass-01', confirm: 'Kavya-pass-01' })).json.next, '/student#intake');
+  await kc.refresh();
+  const home = (await kc.get('/api/student/home')).json;
+  assert.equal(home.next.kind, 'intake'); assert.equal(home.payment.status, 'verified');
+  assert.equal(home.milestones.find((m) => m.key === 'intake').done, false);
+});
+
+test('reminders: sent on schedule without site visits; moving or cancelling a session cancels stale reminders and notifies once', async () => {
+  const start = new Date(Math.ceil((Date.now() + 90 * 60e3) / 60e3) * 60e3).toISOString();
+  const b = await admin.post('/api/admin/bookings', { student_id: ids.s2, mentor_id: ids.mentorA, kind: 'paid_session', scheduled_at: start, outside_availability: true, service: 'Reminder test session' });
+  assert.equal(b.status, 201, b.text);
+  await admin.patch(`/api/admin/bookings/${b.json.id}`, { status: 'scheduled' });
+  await cron();
+  const reminder = (key) => db.all("select dedupe_key, status from anvaya.jobs where dedupe_key like $1", [key]);
+  const first = await reminder(`remind:%:booking:${b.json.id}:${new Date(start).getTime()}`);
+  assert.ok(first.length >= 1, 'reminder created by the scheduled job');
+  assert.ok(mailer.sent.some((m) => m.to === 'neha@students.test' && /Reminder: Reminder test session/.test(m.subject)));
+  // a reminder still waiting for a retry is cancelled when the session moves
+  await db.run("update anvaya.jobs set status = 'failed', run_at = now() + interval '1 hour' where dedupe_key like $1", [`remind:%:booking:${b.json.id}:%`]);
+  const moved = new Date(new Date(start).getTime() + 30 * 60e3).toISOString();
+  assert.equal((await admin.patch(`/api/admin/bookings/${b.json.id}`, { scheduled_at: moved })).status, 200);
+  assert.ok((await reminder(`remind:%:booking:${b.json.id}:${new Date(start).getTime()}`)).every((j) => j.status === 'cancelled'), 'old-time reminders cancelled');
+  await cron();
+  assert.ok((await reminder(`remind:%:booking:${b.json.id}:${new Date(moved).getTime()}`)).length >= 1, 'fresh reminders for the new time');
+  assert.ok(mailer.sent.some((m) => m.to === 'neha@students.test' && /^Moved: Reminder test session/.test(m.subject)));
+  assert.ok((await db.one('select reschedule_count from anvaya.bookings where id = $1', [b.json.id])).reschedule_count === 1);
+  await admin.patch(`/api/admin/bookings/${b.json.id}`, { status: 'cancelled', cancel_reason: 'Mentor unavailable' });
+  await cron();
+  assert.ok(mailer.sent.some((m) => m.to === 'neha@students.test' && /^Cancelled: Reminder test session/.test(m.subject)));
+  // student reschedules their own upcoming session to an open slot (re-validated, notice respected)
+  const far = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  const own = await admin.post('/api/admin/bookings', { student_id: ids.s2, mentor_id: ids.mentorA, kind: 'paid_session', scheduled_at: far[far.length - 1], service: 'Own session' });
+  await admin.patch(`/api/admin/bookings/${own.json.id}`, { status: 'scheduled' });
+  const target = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.at(-3);
+  assert.equal((await stu1.post(`/api/student/bookings/${own.json.id}/reschedule`, { scheduled_at: target })).status, 404, 'only the owner can move it');
+  assert.equal((await stu2.post(`/api/student/bookings/${own.json.id}/reschedule`, { scheduled_at: '2020-01-01T00:00:00Z' })).status, 409);
+  const rs = await stu2.post(`/api/student/bookings/${own.json.id}/reschedule`, { scheduled_at: target });
+  assert.equal(rs.status, 200, rs.text);
+  assert.equal(new Date((await db.one('select scheduled_at from anvaya.bookings where id = $1', [own.json.id])).scheduled_at).toISOString(), target);
+});
+
+test('mentor services: submitted → admin-approved → bookable with its own duration, price and intake; buffers and note visibility respected', async () => {
+  const sv = await mentorA.post('/api/mentor/services', { title: 'Mock interview', description: 'PM product-sense mock', duration_min: 60, price_paise: rupees(1800),
+    intake_questions: [{ label: 'Which company are you interviewing with?', required: true }] });
+  assert.equal(sv.status, 201, sv.text); assert.equal(sv.json.approval, 'pending');
+  const listed = () => stu1.get('/api/student/mentors').then((r) => r.json.find((m) => m.id === ids.mentorA).services.some((x) => x.id === sv.json.id));
+  assert.equal(await listed(), false, 'pending services are hidden');
+  assert.equal((await ops.post(`/api/admin/mentor-services/${sv.json.id}/approve`)).status, 403, 'prices need an admin');
+  assert.equal((await admin.post(`/api/admin/mentor-services/${sv.json.id}/approve`)).status, 200);
+  assert.equal(await listed(), true);
+  assert.ok(!('price_paise' in (await ops.get('/api/admin/mentor-services')).json[0]), 'ops sees services without prices');
+  const filtered = (await stu1.get(`/api/student/mentors?expertise=product&max_price=${rupees(2000)}`)).json;
+  assert.ok(filtered.some((m) => m.id === ids.mentorA));
+  assert.ok(!(await stu1.get(`/api/student/mentors?max_price=${rupees(100)}`)).json.some((m) => m.id === ids.mentorA && m.services.some((x) => x.id === sv.json.id && x.price_paise <= rupees(100))));
+  assert.equal((await mentorA.patch('/api/mentor/me', { buffer_minutes: 15 })).status, 200);
+  const slots = (await stu1.get(`/api/student/mentors/${ids.mentorA}/slots?service_id=${sv.json.id}`)).json;
+  assert.ok(slots.length > 2);
+  const busy = await db.all("select scheduled_at, ends_at from anvaya.bookings where mentor_id = $1 and status in ('pending_payment','requested','scheduled') and ends_at > now()", [ids.mentorA]);
+  for (const sl of slots.slice(0, 40)) {
+    const s0 = new Date(sl).getTime(), e0 = s0 + 60 * 60e3;
+    assert.ok(busy.every((x) => e0 + 15 * 60e3 <= new Date(x.scheduled_at).getTime() || s0 >= new Date(x.ends_at).getTime() + 15 * 60e3), 'buffer kept around booked sessions');
+  }
+  assert.equal((await stu1.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slots[0], service_id: sv.json.id })).status, 400, 'required intake answer');
+  const bk = await stu1.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slots[0], service_id: sv.json.id, intake_answers: { q1: 'Demo Corp' } });
+  assert.equal(bk.status, 201, bk.text);
+  const row = await db.one('select * from anvaya.bookings where id = $1', [bk.json.booking_id]);
+  assert.equal(Number(row.price_paise), rupees(1800)); assert.equal(Number(row.mentor_fee_paise), rupees(1800), 'full stated fee to the mentor');
+  assert.equal(row.duration, 60); assert.equal(row.intake_answers.q1, 'Demo Corp'); assert.equal(row.service, 'Mock interview');
+  // edits send the service back for approval
+  assert.equal((await mentorA.patch(`/api/mentor/services/${sv.json.id}`, { price_paise: rupees(2500) })).json.approval, 'pending');
+  assert.equal(await listed(), false);
+  assert.equal((await mentorB.patch(`/api/mentor/services/${sv.json.id}`, { active: false })).status, 404, 'other mentors cannot touch it');
+  // session notes: private by default; shared only when the mentor chooses
+  await mentorA.patch(`/api/mentor/bookings/${row.id}`, { session_notes: 'Strong structure; add metrics.' });
+  let home = (await stu1.get('/api/student/home')).json;
+  assert.equal(home.sessions.bookings.find((x) => x.id === row.id)?.shared_notes ?? null, null);
+  await mentorA.patch(`/api/mentor/bookings/${row.id}`, { notes_visibility: 'student' });
+  home = (await stu1.get('/api/student/home')).json;
+  assert.equal(home.sessions.bookings.find((x) => x.id === row.id).shared_notes, 'Strong structure; add metrics.');
+  assert.ok(!(await mentorA.get('/api/mentor/agenda')).json.some((x) => x.id === row.id), 'unpaid holds stay off the agenda');
+  assert.ok((await mentorA.get('/api/mentor/agenda')).json.every((x) => ['scheduled', 'requested'].includes(x.status)));
+});
+
 test('deactivating a mentor ends sessions immediately; disabled staff cannot sign in', async () => {
   await admin.post(`/api/admin/mentors/${ids.mentorB}/deactivate`);
   assert.equal((await mentorB.get('/api/mentor/bookings')).status, 401);

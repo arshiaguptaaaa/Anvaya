@@ -45,14 +45,14 @@ jobs.register('sessions.reminders', async () => {
       where b.status = 'scheduled' and b.scheduled_at between now() and now() + make_interval(hours => $1) and s.email <> ''`, [hours]);
     for (const b of bookings) {
       const r = await jobs.enqueue('email.send', { to: b.email, template: 'session_reminder', data: { title: b.service || 'Mentor session', startsAt: b.scheduled_at, meetLink: b.meeting_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },
-        { dedupeKey: `remind:${tag}:booking:${b.id}` });
+        { dedupeKey: `remind:${tag}:booking:${b.id}:${new Date(b.scheduled_at).getTime()}` });
       if (r) n++;
     }
     const lives = await db.all(`select * from anvaya.live_sessions where status = 'scheduled' and starts_at between now() and now() + make_interval(hours => $1)`, [hours]);
     for (const l of lives) {
       for (const p of (await roster(l)).filter((x) => x.email)) {
         const r = await jobs.enqueue('email.send', { to: p.email, template: 'session_reminder', data: { title: l.title, startsAt: l.starts_at, meetLink: l.meet_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },
-          { dedupeKey: `remind:${tag}:live:${l.id}:${p.id}` });
+          { dedupeKey: `remind:${tag}:live:${l.id}:${new Date(l.starts_at).getTime()}:${p.id}` });
         if (r) n++;
       }
     }

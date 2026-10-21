@@ -80,10 +80,62 @@ async function markPaid(orderId, { provider, providerPaymentId = null, amountPai
     if (order.status === 'paid') return { order, paymentId: pay.id, alreadyPaid: true };
     await t.run("update anvaya.orders set status = 'paid', paid_at = now(), resolved_at = now() where id = $1", [order.id]);
     const notices = await fulfil(t, order, userId);
+    notices.push(() => afterPayment(order.id, { provider }));
     return { order, paymentId: pay.id, notices };
   });
   for (const n of out.notices || []) await n();
   return out;
+}
+
+/**
+ * After a payment is recorded (verified by Razorpay, or entered by an admin for UPI/bank transfers):
+ * confirmation email, account invitation or intake prompt, timeline event and a welcome task.
+ * Every step is duplicate-protected per order, so webhook + browser callback + reconciliation can't repeat it.
+ */
+async function afterPayment(orderId, { provider }) {
+  try {
+    const ops = require('./ops');
+    const accounts = require('./accounts');
+    const o = await db.one(`select o.*, p.kind as product_kind, p.name as product_name, s.name as student_name, s.email, s.user_id, s.owner_user_id,
+        s.intake_completed_at from anvaya.orders o left join anvaya.products p on p.id = o.product_id join anvaya.students s on s.id = o.student_id where o.id = $1`, [orderId]);
+    if (!o || o.status !== 'paid') return;
+    const first = await db.one(`insert into anvaya.tasks (title, student_id, owner_user_id, due_at, source, dedupe_key)
+      values ($1,$2,$3, now() + interval '1 day', 'payment', $4) on conflict (dedupe_key) do nothing returning id`,
+    [o.product_kind === 'subscription_plan' ? `Welcome call: ${o.product_name}` : `Check purchase: ${o.description}`, o.student_id, o.owner_user_id, `onboard:order:${o.id}`]);
+    if (!first) return; // already handled for this order
+    const sub = o.product_kind === 'subscription_plan' ? await db.one('select paid_through from anvaya.subscriptions where last_order_id = $1', [o.id]) : null;
+    let next = 'open your dashboard to see what’s included.', invited = false;
+    if (o.product_kind === 'subscription_plan') {
+      await db.run('update anvaya.students set onboarding_started_at = coalesce(onboarding_started_at, now()) where id = $1', [o.student_id]);
+      if (!o.user_id && o.email) {
+        const clash = await db.one('select id from anvaya.users where lower(email) = lower($1)', [o.email]);
+        if (!clash) {
+          const uid = await db.tx(async (t) => {
+            const u = await t.one("insert into anvaya.users (email, name, role) values (lower($1), $2, 'student') returning id", [o.email, o.student_name]);
+            await t.run('update anvaya.students set user_id = $1 where id = $2', [u.id, o.student_id]);
+            return u.id;
+          });
+          const r = await accounts.issue(uid, 'student_invite');
+          invited = true;
+          next = r.delivered ? 'check your inbox for a separate email to set up your account, then complete a short intake.' : 'we’ll send your account set-up link shortly.';
+        } else {
+          await ops.createTask({ title: 'Payment received but email belongs to another account: fix before onboarding', studentId: o.student_id, ownerUserId: o.owner_user_id, source: 'payment', dedupeKey: `onboard-clash:order:${o.id}` });
+        }
+      } else if (!o.intake_completed_at) {
+        next = 'complete your intake so we can match you to a group and mentor.';
+      }
+    }
+    let emailNote = 'no email on file';
+    if (o.email) {
+      const r = await sendEmail(o.email, 'payment_confirmed', { item: o.product_name || o.description, validTill: sub?.paid_through || null, nextStep: next,
+        dashboardUrl: `${BASE_URL()}/student` }, { dedupeKey: `paid:order:${o.id}` });
+      emailNote = r.delivered ? 'confirmation email delivered' : 'confirmation email queued for retry';
+    }
+    const how = provider === 'razorpay' ? 'verified by Razorpay' : 'recorded manually by an admin';
+    await ops.systemEvent(o.student_id, `Payment ${how} for ${o.product_name || o.description}${sub ? `; access active until ${new Date(sub.paid_through).toISOString().slice(0, 10)}` : ''}; ${emailNote}${invited ? '; account invitation sent' : ''}.`);
+  } catch (e) {
+    console.error('[after-payment]', orderId, e.message); // never undo a recorded payment; the welcome task shows it needs a look
+  }
 }
 
 /** Applies what was bought. Returns post-commit callbacks (emails). */
@@ -226,4 +278,4 @@ jobs.register('payments.reconcile', async () => {
   return { checked: stale.length, resolved };
 });
 
-module.exports = { configured, checkoutConfig, createOrder, verifyCheckoutSignature, verifyWebhookSignature, markPaid, markFailed, refund, handleWebhook, notifyBookingConfirmed, fake, hmac, rzp };
+module.exports = { afterPayment, configured, checkoutConfig, createOrder, verifyCheckoutSignature, verifyWebhookSignature, markPaid, markFailed, refund, handleWebhook, notifyBookingConfirmed, fake, hmac, rzp };

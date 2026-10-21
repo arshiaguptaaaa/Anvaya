@@ -3,6 +3,7 @@
 // session calendar (live classes / mentor rooms), attendance, 1:1 bookings, assignment review.
 const express = require('express');
 const db = require('../../db');
+const ops = require('../../lib/ops');
 const ledger = require('../../lib/ledger');
 const bookingsLib = require('../../lib/bookings');
 const subs = require('../../lib/subscriptions');
@@ -230,6 +231,9 @@ r.patch('/live-sessions/:id', staff, wrap(async (req, res) => {
   const f = await saveLive(req, rid);
   await db.tx(async (t) => {
     if (Object.keys(f).length) await t.run(...updateSql('live_sessions', f, rid));
+    if ((f.starts_at && new Date(f.starts_at).getTime() !== new Date(before.starts_at).getTime()) || (f.status === 'cancelled' && before.status !== 'cancelled')) {
+      await ops.cancelStaleReminders({ liveId: rid }, t);
+    }
     if (f.status === 'completed' && before.status !== 'completed') {
       await ledger.recordDeliveryFee(t, await t.one('select * from anvaya.live_sessions where id = $1', [rid]), req.auth.user.id);
     }
@@ -319,15 +323,26 @@ r.patch('/bookings/:id', staff, wrap(async (req, res) => {
   const f = await fields(spec)(req.body || {}, { partial: true });
   if (f.status === 'cancelled') f.cancelled_at = new Date().toISOString();
   if (f.status === 'completed' && b.status !== 'completed') f.completed_at = new Date().toISOString();
+  const moved = f.scheduled_at && new Date(f.scheduled_at).getTime() !== new Date(b.scheduled_at).getTime();
+  const cancelled = f.status === 'cancelled' && b.status !== 'cancelled';
+  if (moved) { f.rescheduled_from = b.scheduled_at; }
   try {
     await db.tx(async (t) => {
       if (Object.keys(f).length) await t.run(...updateSql('bookings', f, bid));
+      if (moved) await t.run('update anvaya.bookings set reschedule_count = reschedule_count + 1 where id = $1', [bid]);
+      if (moved || cancelled) {
+        await ops.cancelStaleReminders({ bookingId: bid }, t);
+        await ops.systemEvent(b.student_id, cancelled ? `Session “${b.service}” cancelled by staff.` : `Session “${b.service}” moved by staff to ${new Date(f.scheduled_at).toISOString()}.`, t);
+      }
       if (f.status === 'completed' && b.status !== 'completed') await ledger.recordSessionEarning(t, await t.one('select * from anvaya.bookings where id = $1', [bid]), req.auth.user.id);
       if (f.status === 'completed' || f.status === 'no_show') await markAttendance(t, { bookingId: bid, marks: [{ student_id: b.student_id, status: f.status === 'completed' ? 'present' : 'absent' }], userId: req.auth.user.id });
     });
   } catch (e) {
     if (/bookings_no_overlap|exclusion/.test(e.message)) throw new HttpError(409, 'The mentor already has a session at that time.');
     throw e;
+  }
+  if ((moved || cancelled) && ['scheduled', 'requested'].includes(b.status)) {
+    ops.notifyBookingChange(bid, { previousAt: b.scheduled_at, cancelled, reason: f.cancel_reason || '' }).catch((e) => console.error('[booking-change]', e.message));
   }
   res.json({ ok: true });
 }));

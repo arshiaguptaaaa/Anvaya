@@ -112,7 +112,7 @@ app.use('/api', require('./routes/public'));
 app.use('/api', require('./routes/files'));
 app.use('/api', require('./routes/cases'));
 const admin = express.Router();
-for (const m of ['core', 'crm', 'mentors', 'commerce', 'learning', 'services']) admin.use(require(`./routes/admin/${m}`));
+for (const m of ['core', 'crm', 'mentors', 'commerce', 'learning', 'services', 'workspace']) admin.use(require(`./routes/admin/${m}`));
 app.use('/api/admin', admin);
 app.use('/api/mentor', require('./routes/mentor'));
 app.use('/api/student', require('./routes/student'));
