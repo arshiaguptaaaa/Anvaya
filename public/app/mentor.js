@@ -14,15 +14,18 @@
       <div class="kv-inline mb-3"><span>When <strong>${esc(dt(b.scheduled_at))} IST</strong></span><span>Length <strong>${b.duration} min</strong></span>
         <span>${b.kind === 'checkup' ? 'Check-up fee' : 'Your fee'} <strong>${inr(b.mentor_fee_paise)}</strong></span>${b.meeting_link ? `<span><a href="${esc(b.meeting_link)}" target="_blank" rel="noopener noreferrer">Join on Meet</a></span>` : ''}</div>
       <form novalidate><div class="form-error" hidden></div>
-        <div class="field"><label class="label">Session notes</label><textarea class="input" name="session_notes" rows="7" placeholder="Takeaways, action items, follow-ups…">${esc(b.session_notes)}</textarea>
-        <p class="hint">Visible to you and the Anvaya team.</p></div>
+        ${Object.keys(b.intake_answers || {}).length ? `<div class="section-label">Student’s answers</div><dl class="kv mb-2">${(b.intake_questions || []).filter((q) => b.intake_answers[q.id]).map((q) => `<dt>${esc(q.label)}</dt><dd>${esc(b.intake_answers[q.id])}</dd>`).join('')}</dl>` : ''}
+        <div class="field"><label class="label">Session notes</label><textarea class="input" name="session_notes" rows="7" placeholder="Takeaways, action items, follow-ups…">${esc(b.session_notes)}</textarea></div>
+        <div class="field"><label class="label">Who can see these notes</label><select class="input" name="notes_visibility">
+          ${[['private', 'Only me'], ['staff', 'Me and the Anvaya team'], ['student', 'Me, the Anvaya team and the student']].map(([v, l]) => `<option value="${v}"${(b.notes_visibility || 'private') === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+          <p class="hint">Notes stay private unless you choose to share them.</p></div>
         <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Close</button><button type="submit" class="btn btn-ghost">Save notes</button>
           ${done ? '' : '<button type="button" class="btn btn-danger" data-noshow>No-show</button><button type="button" class="btn btn-primary" data-complete>Mark completed</button>'}</div></form>`);
     const form = ui.el.querySelector('form');
     onSubmit(form, async (data) => { await api(`/api/mentor/bookings/${b.id}`, { method: 'PATCH', body: data }); toast('Notes saved'); ui.close(); refresh(); });
     ui.el.querySelector('[data-complete]')?.addEventListener('click', async () => {
       if (!await confirmBox('Mark completed?', 'Attendance is recorded and the fee is added to your ledger.', { ok: 'Mark completed' })) return;
-      try { await api(`/api/mentor/bookings/${b.id}/complete`, { method: 'POST', body: { session_notes: form.session_notes.value } }); toast('Completed'); ui.close(); refresh(); } catch (e) { toast(e.message, true); }
+      try { await api(`/api/mentor/bookings/${b.id}`, { method: 'PATCH', body: { notes_visibility: form.notes_visibility.value } }); await api(`/api/mentor/bookings/${b.id}/complete`, { method: 'POST', body: { session_notes: form.session_notes.value } }); toast('Completed'); ui.close(); refresh(); } catch (e) { toast(e.message, true); }
     });
     ui.el.querySelector('[data-noshow]')?.addEventListener('click', async () => {
       if (!await confirmBox('Mark as no-show?', 'The student is flagged for follow-up.', { danger: true, ok: 'No-show' })) return;
@@ -151,10 +154,13 @@
         <div class="section-label">About you</div><div class="form-grid">
           ${A.fieldHtml({ name: 'name', label: 'Full name' }, p.name)}${A.fieldHtml({ name: 'email_ro', label: 'Email (managed by Anvaya)', disabled: true }, p.email)}
           ${A.fieldHtml({ name: 'phone', label: 'Phone' }, p.phone)}${A.fieldHtml({ name: 'linkedin', label: 'LinkedIn URL', type: 'url' }, p.linkedin)}
+          ${A.fieldHtml({ name: 'headline', label: 'Headline', span2: true, placeholder: 'e.g. Senior PM · consumer apps' }, p.headline)}
+          ${A.fieldHtml({ name: 'years_experience', label: 'Years of experience', type: 'number', min: 0, max: 60 }, p.years_experience)}${A.fieldHtml({ name: 'target_roles', label: 'Roles you prepare students for', placeholder: 'e.g. APM, Product Analyst' }, p.target_roles)}
           ${A.fieldHtml({ name: 'expertise', label: 'Expertise', span2: true }, p.expertise)}${A.fieldHtml({ name: 'bio', label: 'Bio', type: 'textarea', span2: true, rows: 5 }, p.bio)}
         </div>
         <div class="section-label mt-1">Session details</div><div class="form-grid">
           ${A.fieldHtml({ name: 'session_duration', label: 'Session length (minutes)', type: 'number', min: 15, max: 240, step: 5 }, p.session_duration)}
+          ${A.fieldHtml({ name: 'buffer_minutes', label: 'Buffer between sessions (minutes)', type: 'number', min: 0, max: 120, step: 5, hint: 'Kept free before and after every booking.' }, p.buffer_minutes)}
           ${A.fieldHtml({ name: 'fee_ro', label: 'Private session fee (set by Anvaya)', disabled: true }, `${inr(p.session_price_paise)} per session`)}
           ${A.fieldHtml({ name: 'meeting_link', label: 'Default meeting link', type: 'url', span2: true, placeholder: 'https://meet.google.com/…' }, p.meeting_link)}
           ${A.fieldHtml({ name: 'session_details', label: 'What a session covers', type: 'textarea', span2: true, rows: 3 }, p.session_details)}
@@ -166,7 +172,28 @@
     onSubmit(document.getElementById('pw'), async (data) => { await api('/api/auth/change-password', { method: 'POST', body: data }); await loadMe(); toast('Password updated'); refresh(); });
   }
 
-  const views = { overview, sessions, students, groups, reviews, earnings, availability, profile };
+  // ── Services (each new or edited service is reviewed by Anvaya before students can book it) ──
+  const qText = (qs) => (qs || []).map((q) => `${q.required ? '* ' : ''}${q.label}`).join('\n');
+  const qParse = (t) => String(t || '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 8).map((l) => ({ label: l.replace(/^\*\s*/, ''), required: l.startsWith('*') }));
+  async function services() {
+    const rows = await api('/api/mentor/services');
+    main.innerHTML = pageHead('Services', 'Your <em>services</em>', 'What students can book with you. The full stated price is paid to you; Anvaya’s processing costs are tracked separately. New services and changes go live after Anvaya approves them.', '<button class="btn btn-primary" data-new>+ Add service</button>')
+      + `<div class="card reveal"><ul class="list">${rows.map((x) => `<li><span><strong class="ivory">${esc(x.title)}</strong><span class="sub-line">${x.duration_min} min · ${inr(x.price_paise)}${x.active ? '' : ' · hidden'}${(x.intake_questions || []).length ? ` · ${x.intake_questions.length} question(s)` : ''}</span></span>
+        <span class="row">${statusPill(x.approval === 'approved' ? 'active' : x.approval)}<button class="btn btn-ghost btn-sm" data-edit="${x.id}">Edit</button></span></li>`).join('') || '<li class="muted">No services yet. Add one so students can book you.</li>'}</ul></div>`;
+    const fieldsFor = () => [{ name: 'title', label: 'Service name', required: true, span2: true }, { name: 'duration_min', label: 'Length (minutes)', type: 'number', min: 15, max: 240, step: 5, required: true },
+      { name: 'price_paise', label: 'Price', type: 'money', required: true }, { name: 'description', label: 'What the student gets', type: 'textarea', span2: true },
+      { name: 'questions', label: 'Questions before booking (one per line; start with * if required)', type: 'textarea', span2: true }, { name: 'active', label: 'Show to students once approved', type: 'checkbox' }];
+    const save = (sid) => async (b) => { const body = { ...b, intake_questions: qParse(b.questions) }; delete body.questions;
+      return api(sid ? `/api/mentor/services/${sid}` : '/api/mentor/services', { method: sid ? 'PATCH' : 'POST', body }); };
+    main.querySelector('[data-new]').addEventListener('click', async () => { await A.formModal({ eyebrow: 'New service', title: 'Add a <em>service</em>', fields: fieldsFor(), values: { duration_min: 45, active: true }, onSave: save(null) }); toast('Sent to Anvaya for approval'); refresh(); });
+    main.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', async () => {
+      const x = rows.find((r) => r.id === Number(b.dataset.edit));
+      await A.formModal({ eyebrow: 'Edit service', title: esc(x.title), fields: fieldsFor(), values: { ...x, questions: qText(x.intake_questions) }, onSave: save(x.id) });
+      toast('Saved. Changes to name, length, price or questions need approval again.'); refresh();
+    }));
+  }
+
+  const views = { overview, sessions, students, groups, reviews, earnings, availability, profile, services };
   let current = 'overview';
   async function render(tab = current) {
     current = views[tab] ? tab : 'overview';

@@ -38,27 +38,134 @@
     rzp.open();
   }
 
-  // ── Home ─────────────────────────────────────────────────────────────
+  // ── Home: what next, when, what's included, progress, who can help ──
+  const MS_ICON = (m) => (m.done ? '✓ ' : '');
   async function home() {
-    const [me, ses] = await Promise.all([api('/api/student/me'), api('/api/student/sessions')]);
-    const sub = me.subscription;
-    const upcoming = [...ses.live.filter((l) => new Date(l.ends_at) > new Date()).map((l) => ({ t: l.starts_at, title: l.title, sub: l.group_name || label(l.kind), link: l.meet_link })),
-      ...ses.bookings.filter((b) => ['scheduled', 'requested', 'pending_payment'].includes(b.status) && new Date(b.scheduled_at) > new Date()).map((b) => ({ t: b.scheduled_at, title: b.service || label(b.kind), sub: `${b.mentor_name || ''} · ${A.label(b.status)}`, link: b.meeting_link }))]
-      .sort((a, b) => new Date(a.t) - new Date(b.t)).slice(0, 6);
-    main.innerHTML = pageHead('Your dashboard', `Hi, <em>${esc(me.name.split(' ')[0])}</em>`, 'Your plan, group and what’s coming up. All times in IST.')
-      + (!me.intake_completed_at ? '<div class="notice reveal">Finish your profile and upload your resume so your mentor can prepare. <a href="#intake">Complete intake →</a></div>' : '')
-      + `<div class="grid-2 reveal mb-3"><div class="card card-pad"><div class="section-label">Your plan</div>
-        ${sub ? `<div class="row-between mb-1"><span class="h2">${esc(sub.plan_name)}</span>${statusPill(sub.effective_access)}</div>
-          <p class="small muted mb-2">Paid through ${esc(d(sub.paid_through))}${sub.effective_access === 'grace' ? ` · access until ${esc(d(sub.grace_until))} — please renew` : ''}${sub.cancel_at_period_end ? ' · ends at period end' : ''}</p>
-          <ul class="list small">${sub.entitlements.map((e) => `<li><span>${esc(ENT_LABEL[e.key] || label(e.key))}</span><span class="muted">${e.limit_count != null ? `${e.used != null ? `${e.used} of ` : ''}${e.limit_count} / ${PER[e.per_period]}` : 'Included'}</span></li>`).join('')}</ul>
-          ${sub.effective_access === 'grace' ? '<a class="btn btn-primary btn-sm mt-2" href="#shop">Renew now</a>' : ''}`
-        : '<p class="sub mb-2">You don’t have an active plan yet. Plans include the syllabus, weekly live training, mentor rooms, check-ups and the Shortlist Club.</p><a class="btn btn-primary btn-sm" href="#shop">See plans</a>'}</div>
-      <div class="card card-pad"><div class="section-label">Your group</div>
-        ${me.group ? `<p class="h2 mb-1">${esc(me.group.name)}</p><p class="small muted mb-2">Mentor: ${esc(me.group.mentor_name || 'To be assigned')}</p>
-          <div class="row">${me.group.meet_link ? `<a class="btn btn-ghost btn-sm" href="${esc(me.group.meet_link)}" target="_blank" rel="noopener noreferrer">Mentor room (Meet)</a>` : ''}${me.group.whatsapp_link ? `<a class="btn btn-ghost btn-sm" href="${esc(me.group.whatsapp_link)}" target="_blank" rel="noopener noreferrer">Shortlist Club (WhatsApp)</a>` : ''}</div>`
-        : `<p class="small muted">${sub ? 'You’ll be placed in a small group matched to your target role, level and availability soon.' : 'Groups are part of the subscription.'}</p>`}</div></div>
-      <div class="card reveal"><div class="card-head"><h2 class="h2">Coming <em>up</em></h2><a class="link-btn" href="#sessions">All sessions →</a></div>
-        ${upcoming.length ? `<ul class="list">${upcoming.map((u) => `<li><div><span class="strong">${esc(u.title)}</span><span class="sub-line muted small">${esc(u.sub)}</span></div><div class="row"><span class="when">${esc(dt(u.t))}</span>${u.link ? `<a class="btn btn-ghost btn-sm" href="${esc(u.link)}" target="_blank" rel="noopener noreferrer">Join</a>` : ''}</div></li>`).join('')}</ul>` : '<div class="empty">Nothing booked yet.</div>'}</div>`;
+    const [h, msgs] = await Promise.all([api('/api/student/home'), api('/api/student/messages')]);
+    const sub = h.subscription;
+    const pay = h.payment.status === 'verified' ? `<span class="pill ok">Payment verified${h.payment.provider === 'razorpay' ? ' · Razorpay' : ''}${h.payment.paid_at ? ` · ${esc(d(h.payment.paid_at))}` : ''}</span>`
+      : h.payment.status === 'none' ? '<span class="pill off">No active plan</span>' : '<span class="pill">Payment recorded</span>';
+    const sessions = [...h.sessions.bookings.map((b) => ({ ...b, t: b.scheduled_at, type: 'booking' })), ...h.sessions.live.map((l) => ({ ...l, t: l.starts_at, type: 'live', service: l.title }))]
+      .sort((a, b) => new Date(a.t) - new Date(b.t)).slice(0, 5);
+    const left = (e) => (e.limit_count == null ? 'Included' : `${Math.max(0, e.limit_count - (e.used || 0))} of ${e.limit_count} left`);
+    const pct = h.progress.total ? Math.round((h.progress.done / h.progress.total) * 100) : 0;
+    main.innerHTML = `<div class="page-head reveal"><div><div class="eyebrow">${esc(h.student.track_name || 'Your preparation')}</div><h1 class="title">Hi, <em>${esc(h.student.name.split(' ')[0])}</em></h1></div>
+        <div class="row wrap">${pay}${sub ? `<span class="pill">${esc(sub.plan_name)} · until ${esc(d(sub.paid_through))}</span>` : ''}</div></div>
+      <section class="next-card reveal mb-3"><div><div class="eyebrow">Your next step</div><h2 class="h2">${esc(h.next.title)}</h2>${h.next.detail ? `<p class="small">${esc(h.next.kind === 'session' ? dt(h.next.detail) : h.next.detail)}</p>` : ''}</div>
+        <a class="btn btn-primary" href="${esc(h.next.href)}">${esc(h.next.cta)} →</a></section>
+      <div class="section-label">Preparation <span class="muted small">${h.milestones.filter((m) => m.done).length} of ${h.milestones.length} · payment is shown separately above</span></div>
+      <div class="ms-grid reveal mb-3">${h.milestones.map((m) => `<div class="ms ${m.done ? 'done' : ''}"><span>${MS_ICON(m)}${esc(m.label)}</span><span class="sub-line">${m.done ? (m.at ? esc(d(m.at)) : esc(m.detail || 'Done')) : esc(m.detail || 'Not yet')}</span></div>`).join('')}</div>
+      <div class="home-grid">
+        <div class="home-col">
+          <div class="card reveal"><div class="card-head"><h2 class="h2">Upcoming <em>sessions</em></h2><a class="link-btn" href="#sessions">All sessions →</a></div>
+            <ul class="list">${sessions.map((x) => `<li class="sess"><div><span class="strong">${esc(x.service)}</span><span class="sub-line">${esc(dt(x.t))}${x.mentor_name ? ` · ${esc(x.mentor_name)}` : ''}</span>
+              <span class="pill ${x.type === 'live' ? 'off' : x.kind === 'checkup' ? '' : 'ok'}">${x.type === 'live' ? 'Group session · included' : x.kind === 'checkup' ? 'Included check-up' : `Paid session${x.status === 'pending_payment' ? ' · awaiting payment' : ''}`}</span>
+              ${x.shared_notes ? `<span class="sub-line">Mentor notes: ${esc(x.shared_notes)}</span>` : ''}</div>
+              <div class="row wrap">${x.type === 'live' ? (x.meet_link ? `<a class="btn btn-ghost btn-sm" href="${esc(x.meet_link)}" target="_blank" rel="noopener noreferrer">Join</a>` : '')
+                : `${x.can_join ? `<a class="btn btn-primary btn-sm" href="${esc(x.meeting_link)}" target="_blank" rel="noopener noreferrer">Join</a>` : `<button class="btn btn-ghost btn-sm" disabled title="Opens 10 minutes before">Join</button>`}
+                ${x.can_reschedule ? `<button class="btn btn-ghost btn-sm" data-move="${x.id}" data-m="${x.mentor_id}" data-svc="${x.service_id || ''}">Reschedule</button>` : ''}${x.can_cancel ? `<button class="btn btn-ghost btn-sm" data-cancel="${x.id}">Cancel</button>` : ''}`}</div></li>`).join('')
+              || `<li class="muted small">Nothing booked yet.${sub ? ' <a href="#sessions">Book your check-up</a> or <a href="#mentors">find a mentor</a>.' : ''}</li>`}</ul>
+            <p class="small muted pad">You can reschedule or cancel online until shortly before a session; after that, message the Anvaya team.</p></div>
+          <div class="card reveal"><div class="card-head"><h2 class="h2">Syllabus &amp; <em>progress</em></h2><a class="link-btn" href="#learn">Open syllabus →</a></div>
+            <div class="pad"><div class="meter"><i style="width:${pct}%"></i></div><p class="small muted mt-1">${h.progress.total ? `${h.progress.done} of ${h.progress.total} assignments submitted (${pct}%)` : 'Your syllabus appears once you’re enrolled in a track.'}</p></div></div>
+          <div class="card reveal"><div class="card-head"><h2 class="h2">Messages from <em>Anvaya</em></h2><a class="link-btn" href="#support">Support →</a></div>
+            <ul class="list small">${msgs.filter((m) => m.author_role !== 'student').slice(0, 3).map((m) => `<li><span>${esc(m.body)}<span class="sub-line">${esc(m.author)} · ${esc(dt(m.created_at))}</span></span></li>`).join('') || '<li class="muted">No messages yet.</li>'}</ul></div>
+        </div>
+        <div class="home-col">
+          <div class="card card-pad reveal"><div class="section-label">Your plan includes</div>
+            ${sub ? `<ul class="list tight small">${sub.entitlements.map((e) => `<li><span>${esc(ENT_LABEL[e.key] || label(e.key))}</span><span class="strong">${esc(left(e))}</span></li>`).join('')}</ul>
+              <p class="small muted mt-1">Valid until ${esc(d(sub.paid_through))}. Paid mentor sessions are separate and don’t use these.</p>`
+              : '<p class="small muted mb-2">No active plan. Plans include the syllabus, live training, mentor rooms and check-ups.</p><a class="btn btn-primary btn-sm" href="#shop">See plans</a>'}</div>
+          <div class="card card-pad reveal"><div class="section-label">Who can help</div>
+            <ul class="list tight small">${h.group ? `<li><span><strong class="ivory">${esc(h.group.mentor_name || 'Mentor to be assigned')}</strong><span class="sub-line">Your group mentor · ${esc(h.group.name)}</span></span></li>` : '<li class="muted">You’ll be matched to a group and mentor after intake.</li>'}
+              <li><span><strong class="ivory">Anvaya team</strong><span class="sub-line">Questions about sessions, plans or payments</span></span><a class="btn btn-ghost btn-sm" href="#support">Ask</a></li>
+              ${h.group?.whatsapp_link ? `<li><span><strong class="ivory">Community</strong><span class="sub-line">Your group’s WhatsApp</span></span><a class="btn btn-ghost btn-sm" href="${esc(h.group.whatsapp_link)}" target="_blank" rel="noopener noreferrer">Open</a></li>` : ''}
+              <li><span><strong class="ivory">Mentors</strong><span class="sub-line">Book a paid 1:1 with any mentor</span></span><a class="btn btn-ghost btn-sm" href="#mentors">Browse</a></li></ul></div>
+          <div class="card card-pad reveal"><div class="section-label">Support requests</div>
+            <ul class="list tight small">${h.support.map((c) => `<li><span>${esc(c.subject)}<span class="sub-line">${esc(dt(c.updated_at))}</span></span>${statusPill(c.status)}</li>`).join('') || '<li class="muted">None. <a href="#support">Raise a request</a> if you need help.</li>'}</ul></div>
+        </div></div>`;
+    bindSessionActions(main);
+  }
+  function bindSessionActions(root) {
+    root.querySelectorAll('[data-move]').forEach((b) => b.addEventListener('click', () => {
+      const q = b.dataset.svc ? `?service_id=${b.dataset.svc}` : '';
+      slotPicker(Number(b.dataset.m), 'Pick a <em>new time</em>', async (s) => {
+        await api(`/api/student/bookings/${b.dataset.move}/reschedule`, { method: 'POST', body: { scheduled_at: s } }); toast('Moved. We’ve emailed the new time.'); refresh();
+      }, q);
+    }));
+    root.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
+      if (!await confirmBox('Cancel this session?', 'Check-ups go back to your plan allowance. For paid sessions, the team will contact you about a refund or a new time.', { danger: true, ok: 'Cancel session' })) return;
+      const r = await api(`/api/student/bookings/${b.dataset.cancel}/cancel`, { method: 'POST', body: {} }); toast(r.refund || 'Cancelled'); refresh();
+    }));
+  }
+
+  // ── Mentors: discovery → profile → service → slot → questions → payment → confirmation ──
+  async function mentors() {
+    const st = { expertise: '', role: '', max_price: '', available: '' };
+    main.innerHTML = pageHead('Mentors', 'Find a <em>mentor</em>', 'Private 1:1 sessions are paid separately from your plan, and the full stated fee goes to the mentor.')
+      + `<div class="card reveal mb-3"><div class="toolbar"><input class="input" data-f="expertise" placeholder="Expertise (e.g. product, consulting)" aria-label="Expertise">
+        <input class="input" data-f="role" placeholder="Target role (e.g. APM)" aria-label="Target role">
+        <select class="input" data-f="max_price" aria-label="Price"><option value="">Any price</option><option value="100000">Up to ₹1,000</option><option value="200000">Up to ₹2,000</option><option value="350000">Up to ₹3,500</option></select>
+        <select class="input" data-f="available" aria-label="Availability"><option value="">Any availability</option><option value="week">Free this week</option></select></div></div>
+      <div class="m-grid" id="mlist"><p class="sub">Loading…</p></div>`;
+    const list = main.querySelector('#mlist');
+    const draw = async () => {
+      const qs = new URLSearchParams(Object.entries(st).filter(([, v]) => v)).toString();
+      const ms = await api(`/api/student/mentors?${qs}`);
+      list.innerHTML = ms.map((m) => `<div class="card m-card"><div class="row"><span class="avatar">${esc(m.name.split(' ').map((x) => x[0]).join('').slice(0, 2))}</span>
+          <div><h3 class="h2">${esc(m.name)}</h3><p class="small muted">${esc(m.headline || m.expertise)}${m.years_experience != null ? ` · ${m.years_experience} yrs` : ''}</p></div></div>
+          <p class="small mt-1">${esc((m.bio || '').slice(0, 180))}${(m.bio || '').length > 180 ? '…' : ''}</p>
+          <ul class="list tight small">${m.services.map((x) => `<li><span>${esc(x.title)}<span class="sub-line">${x.duration_min} min</span></span><span class="strong">${inr(x.price_paise)}</span></li>`).join('') || '<li class="muted">No bookable services yet.</li>'}</ul>
+          ${m.services.length ? `<button class="btn btn-primary btn-sm mt-1" data-profile="${m.id}">View &amp; book</button>` : ''}</div>`).join('')
+        || '<div class="card card-pad"><p class="muted">No mentors match these filters yet.</p></div>';
+      list.querySelectorAll('[data-profile]').forEach((b) => b.addEventListener('click', () => profile(ms.find((x) => x.id === Number(b.dataset.profile)))));
+    };
+    let timer;
+    main.querySelectorAll('[data-f]').forEach((el) => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => { clearTimeout(timer); timer = setTimeout(() => { st[el.dataset.f] = el.value; draw(); }, 300); }));
+    await draw();
+  }
+  function profile(m) {
+    const ui = modal(`<div class="eyebrow">Mentor</div><h2 class="h2 mb-1">${esc(m.name)}</h2><p class="small muted mb-2">${esc(m.headline || m.expertise)}${m.years_experience != null ? ` · ${m.years_experience} years’ experience` : ''}${m.target_roles ? ` · Prepares for ${esc(m.target_roles)}` : ''}</p>
+      <p class="small mb-2" style="white-space:pre-line">${esc(m.bio || '')}</p><div class="section-label">1. Choose a service</div>
+      <ul class="list tight">${m.services.map((x) => `<li><span><strong class="ivory">${esc(x.title)}</strong><span class="sub-line">${x.duration_min} min${x.description ? ` · ${esc(x.description)}` : ''}</span></span>
+        <span class="row"><span class="strong">${inr(x.price_paise)}</span><button class="btn btn-primary btn-sm" data-svc="${x.id}">Choose</button></span></li>`).join('')}</ul>
+      <p class="hint">Steps: service → time → a few questions → payment → confirmation.</p>`, { wide: true });
+    ui.el.querySelectorAll('[data-svc]').forEach((b) => b.addEventListener('click', () => {
+      const svc = m.services.find((x) => x.id === Number(b.dataset.svc)); ui.close();
+      slotPicker(m.id, `2. Pick a time · ${esc(svc.title)}`, async (slot) => {
+        const answers = await intakeQuestions(svc);
+        if (!answers) throw new Error('Booking not started.');
+        const r = await api('/api/student/bookings/paid', { method: 'POST', body: { mentor_id: m.id, scheduled_at: slot, service_id: svc.id, intake_answers: answers } });
+        await pay(r.checkout, { onDone: () => { location.hash = 'sessions'; } });
+      }, `?service_id=${svc.id}`);
+    }));
+  }
+  function intakeQuestions(svc) {
+    const qs = Array.isArray(svc.intake_questions) ? svc.intake_questions : [];
+    if (!qs.length) return Promise.resolve({});
+    return new Promise((resolve) => {
+      const ui = modal(`<div class="eyebrow">3. A few questions</div><h2 class="h2 mb-2">Help your mentor <em>prepare</em></h2><form novalidate><div class="form-error" hidden></div>
+        ${qs.map((q) => `<div class="field"><label class="label">${esc(q.label)}${q.required ? ' *' : ''}</label><textarea class="input" name="${esc(q.id)}" rows="2"${q.required ? ' required' : ''}></textarea></div>`).join('')}
+        <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Back</button><button class="btn btn-primary" type="submit">Continue to payment</button></div></form>`, { onClose: () => resolve(null) });
+      onSubmit(ui.el.querySelector('form'), async (d2) => { resolve(d2); ui.close(); });
+    });
+  }
+
+  // ── Support & messages ───────────────────────────────────────────
+  async function support() {
+    const [cases, msgs] = await Promise.all([api('/api/student/support'), api('/api/student/messages')]);
+    main.innerHTML = pageHead('Support', 'Help &amp; <em>messages</em>', 'Ask the Anvaya team anything about sessions, plans, payments or your mentor. Replies appear here.', '<button class="btn btn-primary" data-new>+ New request</button>')
+      + `<div class="grid-2 reveal"><div class="card"><div class="card-head"><h2 class="h2">Your <em>requests</em></h2></div><ul class="list small">${cases.map((c) => `<li class="col"><div class="row-between"><strong class="ivory">${esc(c.subject)}</strong>${statusPill(c.status)}</div>
+          <ol class="thread">${c.history.map((h2) => `<li><span class="sub-line">${esc(h2.author)} · ${esc(dt(h2.created_at))}</span>${esc(h2.body)}</li>`).join('')}</ol>
+          ${c.status !== 'resolved' ? `<form data-reply="${c.id}" novalidate class="row wrap"><input class="input" name="body" placeholder="Reply…" required aria-label="Reply"><button class="btn btn-ghost btn-sm" type="submit">Send</button></form>` : ''}</li>`).join('') || '<li class="muted">No requests yet.</li>'}</ul></div>
+        <div class="card"><div class="card-head"><h2 class="h2">Messages from <em>Anvaya</em></h2></div><ul class="list small">${msgs.filter((m) => !m.support_case_id && m.author_role !== 'student').map((m) => `<li><span>${esc(m.body)}<span class="sub-line">${esc(m.author)} · ${esc(dt(m.created_at))}</span></span></li>`).join('') || '<li class="muted">No messages yet.</li>'}</ul></div></div>`;
+    main.querySelector('[data-new]').addEventListener('click', async () => {
+      await formModal({ eyebrow: 'Support', title: 'New <em>request</em>', fields: [{ name: 'subject', label: 'Subject', required: true, span2: true },
+        { name: 'category', label: 'Topic', type: 'select', options: [['general', 'General'], ['sessions', 'Sessions'], ['payments', 'Payments'], ['technical', 'Technical'], ['mentor', 'My mentor'], ['other', 'Other']] },
+        { name: 'body', label: 'Message', type: 'textarea', required: true, span2: true }], onSave: (b) => api('/api/student/support', { method: 'POST', body: b }) });
+      toast('Request sent. We usually reply within a working day.'); refresh();
+    });
+    main.querySelectorAll('[data-reply]').forEach((f) => onSubmit(f, async (b) => { await api(`/api/student/support/${f.dataset.reply}/reply`, { method: 'POST', body: b }); toast('Reply sent'); refresh(); }));
   }
 
   // ── Intake ───────────────────────────────────────────────────────────
@@ -120,8 +227,8 @@
   }
 
   // ── Sessions & booking ───────────────────────────────────────────────
-  async function slotPicker(mentorId, title, onPick) {
-    const slots = await api(`/api/student/mentors/${mentorId}/slots`);
+  async function slotPicker(mentorId, title, onPick, query = '') {
+    const slots = await api(`/api/student/mentors/${mentorId}/slots${query}`);
     let chosen = null;
     const byDay = {};
     for (const s of slots) (byDay[d(s)] ||= []).push(s);
@@ -150,9 +257,11 @@
       { h: 'Session', cls: 'strong', render: (b) => `${esc(b.service || label(b.kind))}<span class="sub-line">${esc(b.mentor_name || '')}${b.price_paise ? ` · ${inr(b.price_paise)}` : ''}</span>` },
       { h: 'Status', render: (b) => statusPill(b.status) },
     ], rowActions: (b) => (b.meeting_link && b.status === 'scheduled' ? `<a class="btn btn-ghost btn-sm" href="${esc(b.meeting_link)}" target="_blank" rel="noopener noreferrer">Join</a>` : '')
+      + (['scheduled', 'requested'].includes(b.status) && new Date(b.scheduled_at) > new Date() ? `<button class="btn btn-ghost btn-sm" data-move="${b.id}" data-m="${b.mentor_id}" data-svc="${b.service_id || ''}">Reschedule</button>` : '')
       + (['scheduled', 'requested', 'pending_payment'].includes(b.status) && new Date(b.scheduled_at) > new Date() ? btn('cancel', 'Cancel', 'btn-danger') : '')
       + (b.status === 'completed' ? btn('fb', 'Feedback') : ''), empty: 'No 1:1 sessions yet.' });
     main.append(lCard, bCard);
+    bindSessionActions(bCard);
     main.querySelector('[data-ck]')?.addEventListener('click', async () => {
       const mid = me.group?.mentor_id || me.mentor_id;
       if (!mid) return toast('Your mentor hasn’t been assigned yet. The Anvaya team will set this up soon.', true);
@@ -160,18 +269,7 @@
         await api('/api/student/bookings/checkup', { method: 'POST', body: { mentor_id: mid, scheduled_at: s } }); toast('Check-up booked — confirmation emailed'); refresh();
       });
     });
-    main.querySelector('[data-paid]').addEventListener('click', () => {
-      const avail = mentors.filter((m) => m.accepts_paid_sessions);
-      const ui = modal(`<div class="eyebrow">Private session</div><h2 class="h2 mb-2">Choose a <em>mentor</em></h2><p class="hint mb-2">Paid separately from your plan. The full fee goes to the mentor.</p>
-        <div class="grid-2">${avail.map((m) => `<div class="card tile"><h3 class="h2">${esc(m.name)}</h3><p class="small muted">${esc(m.expertise)}</p><p class="price">${inr(m.session_price_paise)}</p><p class="small muted mb-2">${m.session_duration} min${m.session_details ? ` · ${esc(m.session_details)}` : ''}</p><button class="btn btn-primary btn-sm" data-m="${m.id}">See times</button></div>`).join('') || '<p class="muted">No mentors are taking private sessions right now.</p>'}</div>`, { wide: true });
-      ui.el.querySelectorAll('[data-m]').forEach((b) => b.addEventListener('click', async () => {
-        const m = avail.find((x) => x.id === Number(b.dataset.m)); ui.close();
-        await slotPicker(m.id, `${esc(m.name)} · ${inr(m.session_price_paise)}`, async (s) => {
-          const r = await api('/api/student/bookings/paid', { method: 'POST', body: { mentor_id: m.id, scheduled_at: s } });
-          await pay(r.checkout, { onDone: refresh });
-        });
-      }));
-    });
+    main.querySelector('[data-paid]').addEventListener('click', () => { location.hash = 'mentors'; });
     onAct(bCard, {
       cancel: async (i) => { if (!await confirmBox('Cancel this session?', 'Check-ups are returned to your plan allowance. For paid sessions, the team will contact you about a refund or a new time.', { danger: true, ok: 'Cancel session' })) return; const r = await api(`/api/student/bookings/${i}/cancel`, { method: 'POST', body: {} }); toast(r.refund || 'Cancelled'); refresh(); },
       fb: (i) => feedbackModal({ booking_id: i }),
@@ -266,7 +364,7 @@
     onSubmit(main.querySelector('#fb'), async (data) => { await api('/api/student/feedback', { method: 'POST', body: data }); toast('Thank you!'); main.querySelector('#fb').reset(); });
   }
 
-  const views = { home, intake, learn, sessions, services, shop, outcomes, feedback };
+  const views = { home, intake, learn, sessions, mentors, support, messages: support, services, shop, outcomes, feedback };
   let current = 'home';
   async function render(tab = current) {
     current = views[tab] ? tab : 'home';

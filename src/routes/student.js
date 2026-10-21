@@ -123,7 +123,7 @@ r.get('/sessions', wrap(async (req, res) => {
       or (l.group_id is null and l.cohort_id in (select cohort_id from anvaya.cohort_members where student_id = $1))
       or (l.group_id is null and l.cohort_id is null and (l.track_id is null or l.track_id in (select track_id from anvaya.enrollments where student_id = $1 and status = 'active'))))
     order by l.starts_at`, [sid]) : [];
-  const bookings = await db.all(`select b.id, b.kind, b.service, b.scheduled_at, b.duration, b.status, b.meeting_link, b.price_paise, b.order_id, b.hold_expires_at, m.name as mentor_name
+  const bookings = await db.all(`select b.id, b.kind, b.service, b.scheduled_at, b.duration, b.status, b.meeting_link, b.price_paise, b.order_id, b.hold_expires_at, b.mentor_id, b.service_id, m.name as mentor_name
     from anvaya.bookings b left join anvaya.mentors m on m.id = b.mentor_id where b.student_id = $1 and b.status <> 'cancelled' order by b.scheduled_at desc`, [sid]);
   res.json({ live, bookings, has_access: !!sub });
 }));
@@ -219,7 +219,7 @@ r.get('/home', wrap(async (req, res) => {
   const group = await db.one(`select g.id, g.name, g.whatsapp_link, g.meet_link, m.id as mentor_id, m.name as mentor_name, m.headline as mentor_headline
     from anvaya.group_members gm join anvaya.mentor_groups g on g.id = gm.group_id left join anvaya.mentors m on m.id = g.mentor_id where gm.student_id = $1 and gm.left_at is null`, [sid]);
   const notice = Number(await settings.get('booking_min_notice_hours')) * 3600e3;
-  const bookings = await db.all(`select b.id, b.kind, b.service, b.scheduled_at, b.ends_at, b.duration, b.status, b.meeting_link, m.name as mentor_name, b.mentor_id,
+  const bookings = await db.all(`select b.id, b.kind, b.service, b.scheduled_at, b.ends_at, b.duration, b.status, b.meeting_link, m.name as mentor_name, b.mentor_id, b.service_id,
       case when b.notes_visibility = 'student' then b.session_notes else null end as shared_notes
     from anvaya.bookings b left join anvaya.mentors m on m.id = b.mentor_id where b.student_id = $1 and b.status in ('scheduled','requested','pending_payment') and b.ends_at > now()
     order by b.scheduled_at limit 10`, [sid]);

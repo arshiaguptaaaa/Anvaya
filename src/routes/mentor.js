@@ -14,7 +14,7 @@ r.use(sec.requireRole('mentor'));
 
 async function mentorProfile(mid) {
   const m = await db.one(`select m.id, m.name, m.expertise, m.bio, m.session_price_paise, m.checkup_fee_paise, m.session_duration, m.session_details,
-    m.meeting_link, m.phone, m.linkedin, m.timezone, m.status, m.profile_completed, m.accepts_paid_sessions, u.email
+    m.meeting_link, m.phone, m.linkedin, m.timezone, m.status, m.profile_completed, m.accepts_paid_sessions, m.headline, m.years_experience, m.target_roles, m.buffer_minutes, u.email
     from anvaya.mentors m join anvaya.users u on u.id = m.user_id where m.id = $1`, [mid]);
   m.availability = await db.all('select weekday, start_time, end_time from anvaya.availability where mentor_id = $1 order by weekday, start_time', [mid]);
   return m;
@@ -112,7 +112,8 @@ r.get('/overview', wrap(async (req, res) => {
 
 r.get('/bookings', wrap(async (req, res) => {
   res.json(await db.all(`select b.id, b.student_id, b.kind, b.service, b.scheduled_at, b.duration, b.status, b.mentor_fee_paise, b.meeting_link,
-    b.session_notes, b.completed_at, s.name as student_name,
+    b.session_notes, b.notes_visibility, b.intake_answers, b.service_id, b.completed_at, s.name as student_name,
+    (select ms.intake_questions from anvaya.mentor_services ms where ms.id = b.service_id) as intake_questions,
     (select status from anvaya.attendance a where a.booking_id = b.id) as attendance
     from anvaya.bookings b join anvaya.students s on s.id = b.student_id where b.mentor_id = $1 and b.status <> 'pending_payment' order by b.scheduled_at desc`, [req.auth.mentor.id]));
 }));
