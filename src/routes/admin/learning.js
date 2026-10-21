@@ -332,7 +332,7 @@ r.patch('/bookings/:id', staff, wrap(async (req, res) => {
       if (moved) await t.run('update anvaya.bookings set reschedule_count = reschedule_count + 1 where id = $1', [bid]);
       if (moved || cancelled) {
         await ops.cancelStaleReminders({ bookingId: bid }, t);
-        await ops.systemEvent(b.student_id, cancelled ? `Session “${b.service}” cancelled by staff.` : `Session “${b.service}” moved by staff to ${new Date(f.scheduled_at).toISOString()}.`, t);
+        await ops.systemEvent(b.student_id, cancelled ? `Session “${b.service}” cancelled by staff.` : `Session “${b.service}” moved by staff to ${ops.ist(f.scheduled_at)}.`, t);
       }
       if (f.status === 'completed' && b.status !== 'completed') await ledger.recordSessionEarning(t, await t.one('select * from anvaya.bookings where id = $1', [bid]), req.auth.user.id);
       if (f.status === 'completed' || f.status === 'no_show') await markAttendance(t, { bookingId: bid, marks: [{ student_id: b.student_id, status: f.status === 'completed' ? 'present' : 'absent' }], userId: req.auth.user.id });

@@ -159,7 +159,7 @@ r.patch('/followup/:scope/:id', staff, wrap(async (req, res) => {
   if (b.follow_up_at !== undefined) set('follow_up_at', v.date(b.follow_up_at));
   if (!sets.length) throw bad('Nothing to update.');
   await db.run(`update anvaya.${table} set ${sets.join(', ')} where id = $1`, p);
-  if (table === 'students') await ops.systemEvent(rid, `Follow-up updated: ${[b.next_action && `next action “${b.next_action}”`, b.follow_up_at && `due ${b.follow_up_at}`, b.owner_user_id !== undefined && 'owner changed'].filter(Boolean).join(', ')}`);
+  if (table === 'students') await ops.systemEvent(rid, `Follow-up updated: ${[b.next_action && `next action “${b.next_action}”`, b.follow_up_at && `due ${ops.ist(b.follow_up_at)}`, b.owner_user_id !== undefined && 'owner changed'].filter(Boolean).join(', ')}`);
   if (table === 'leads') await db.run("insert into anvaya.lead_activities (lead_id, user_id, kind, body) values ($1,$2,'system',$3)", [rid, me(req), 'Owner / follow-up updated']);
   db.audit(me(req), `${table}_followup`, `${table}:${rid}`);
   res.json({ ok: true });
@@ -299,6 +299,17 @@ r.post('/students/:id/entries', staff, wrap(async (req, res) => {
   res.status(201).json({ id: out.entryId, email: out.email });
 }));
 
+/** Staff-marked milestones (assessment, progress review). */
+r.post('/students/:id/milestones', staff, wrap(async (req, res) => {
+  const sid = id(req);
+  const col = { assessment: 'assessment_completed_at', review: 'progress_reviewed_at' }[req.body?.milestone];
+  if (!col) throw bad('Choose assessment or review.');
+  const done = req.body?.done !== false;
+  const x = await db.run(`update anvaya.students set ${col} = ${done ? 'coalesce(' + col + ', now())' : 'null'} where id = $1`, [sid]);
+  if (!x.rowCount) throw new HttpError(404, 'Student not found.');
+  await ops.systemEvent(sid, `${req.body.milestone === 'assessment' ? 'Assessment' : 'Progress review'} marked ${done ? 'done' : 'not done'} by ${req.auth.user.name || req.auth.user.email}`);
+  res.json({ ok: true });
+}));
 r.get('/support', staff, wrap(async (req, res) => {
   res.json(await db.all(`select c.*, s.name as student_name, coalesce(nullif(u.name,''), u.email) as owner_name from anvaya.support_cases c
     join anvaya.students s on s.id = c.student_id left join anvaya.users u on u.id = c.owner_user_id

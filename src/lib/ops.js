@@ -6,6 +6,9 @@ const db = require('../db');
 const { sendEmail } = require('./email');
 const { BASE_URL } = require('./accounts');
 
+/** Human time in IST for timeline text. */
+const ist = (x) => new Date(x).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) + ' IST';
+
 /** Adds a timeline entry. kind: internal_note | message | system. Returns the entry id. */
 async function addEntry({ studentId = null, leadId = null, caseId = null, kind, body, userId = null, role = 'system' }, q = db) {
   const r = await q.one(`insert into anvaya.record_entries (student_id, lead_id, support_case_id, kind, body, author_user_id, author_role)
@@ -57,4 +60,4 @@ async function notifyBookingChange(bookingId, { previousAt, cancelled = false, r
     dashboardUrl: `${BASE_URL()}/student#sessions` }, { immediate: false, dedupeKey: `changed:booking:${b.id}:${cancelled ? 'x' : new Date(b.scheduled_at).getTime()}` });
 }
 
-module.exports = { addEntry, systemEvent, postMessage, createTask, cancelStaleReminders, notifyBookingChange };
+module.exports = { ist, addEntry, systemEvent, postMessage, createTask, cancelStaleReminders, notifyBookingChange };

@@ -199,7 +199,7 @@ r.post('/bookings/:id/cancel', wrap(async (req, res) => {
   await db.tx(async (t) => {
     await t.run("update anvaya.bookings set status = 'cancelled', cancelled_at = now(), cancel_reason = 'Cancelled by student' where id = $1", [b.id]);
     await ops.cancelStaleReminders({ bookingId: b.id }, t);
-    await ops.systemEvent(b.student_id, `Student cancelled “${b.service}” (${new Date(b.scheduled_at).toISOString()}).`, t);
+    await ops.systemEvent(b.student_id, `Student cancelled “${b.service}” (${ops.ist(b.scheduled_at)}).`, t);
   });
   if (b.status === 'scheduled') ops.notifyBookingChange(b.id, { previousAt: b.scheduled_at, cancelled: true }).catch(() => {});
   if (b.kind === 'paid_session' && b.status === 'scheduled') {

@@ -132,7 +132,7 @@ async function afterPayment(orderId, { provider }) {
       emailNote = r.delivered ? 'confirmation email delivered' : 'confirmation email queued for retry';
     }
     const how = provider === 'razorpay' ? 'verified by Razorpay' : 'recorded manually by an admin';
-    await ops.systemEvent(o.student_id, `Payment ${how} for ${o.product_name || o.description}${sub ? `; access active until ${new Date(sub.paid_through).toISOString().slice(0, 10)}` : ''}; ${emailNote}${invited ? '; account invitation sent' : ''}.`);
+    await ops.systemEvent(o.student_id, `Payment ${how} for ${o.product_name || o.description}${sub ? `; access active until ${ops.ist(sub.paid_through)}` : ''}; ${emailNote}${invited ? '; account invitation sent' : ''}.`);
   } catch (e) {
     console.error('[after-payment]', orderId, e.message); // never undo a recorded payment; the welcome task shows it needs a look
   }

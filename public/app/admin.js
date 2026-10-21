@@ -699,14 +699,27 @@
   }
 
   // ── Router ───────────────────────────────────────────────────────────
-  const views = { overview, followups, leads, students, mentors, groups, calendar, syllabus, services, subscriptions, catalog, payments, payables, cohorts, reports, team, settings: settingsPage, system };
-  let current = 'overview';
+  const O = window.AnvayaOps;
+  const ctx = () => ({ main, refresh, leadDetail, leadFields, studentFields, studentDetail, isAdmin });
+  const views = { today: () => O.today(ctx()), overview, followups, leads: () => O.table(ctx(), 'leads'), students: () => O.table(ctx(), 'students'), support: () => O.support(ctx()),
+    'mentor-services': () => O.serviceApprovals(ctx()), 'leads-classic': leads, 'students-classic': students,
+    mentors, groups, calendar, syllabus, services, subscriptions, catalog, payments, payables, cohorts, reports, team, settings: settingsPage, system };
+  let current = 'today';
   async function render(tab = current) {
-    current = views[tab] ? tab : 'overview';
+    // Deep links: #student-123 (unified record), #queue-followups_due (a saved queue)
+    const m = /^(student|queue)-(.+)$/.exec(tab);
+    if (m) {
+      current = tab;
+      const fresh = main.cloneNode(false); main.replaceWith(fresh); main = fresh;
+      main.innerHTML = '<p class="sub">Loading…</p>';
+      try { await (m[1] === 'student' ? O.workspace(ctx(), Number(m[2])) : O.queue(ctx(), m[2])); } catch (e) { main.innerHTML = `<div class="form-error">${esc(e.message)}</div>`; }
+      return;
+    }
+    current = views[tab] ? tab : 'today';
     const fresh = main.cloneNode(false); main.replaceWith(fresh); main = fresh;
     main.innerHTML = '<p class="sub">Loading…</p>';
     try { await views[current](); } catch (e) { main.innerHTML = `<div class="form-error">${esc(e.message)}</div>`; }
   }
-  A.shell(render);
+  A.shell(render, 'today');
   api('/api/admin/overview').then((o) => { setCount('leads', o.counts.leadsNew); setCount('followups', o.counts.followupsDue + o.counts.studentsNeedingFollowup); setCount('mentors', o.counts.mentorsPending); setCount('services', o.counts.casesOpen); setCount('system', o.counts.sheetFailures); }).catch(() => {});
 })();

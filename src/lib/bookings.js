@@ -140,7 +140,7 @@ async function reschedule({ bookingId, startsAt, byUserId, studentId = null, all
       }
       await t.run(`update anvaya.bookings set scheduled_at = $2, rescheduled_from = $3, reschedule_count = reschedule_count + 1 where id = $1`, [b.id, iso, b.scheduled_at]);
       await ops.cancelStaleReminders({ bookingId: b.id }, t);
-      await ops.systemEvent(b.student_id, `Session “${b.service}” moved from ${new Date(b.scheduled_at).toISOString()} to ${iso}.`, t);
+      await ops.systemEvent(b.student_id, `Session “${b.service}” moved from ${ops.ist(b.scheduled_at)} to ${ops.ist(iso)}.`, t);
       await t.run("insert into anvaya.audit_log (user_id, action, detail) values ($1, 'booking_rescheduled', $2)", [byUserId, `booking:${b.id} from:${new Date(b.scheduled_at).toISOString()} to:${iso}`]);
       return { ...b, previous_at: b.scheduled_at, scheduled_at: iso };
     });
