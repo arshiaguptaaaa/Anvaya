@@ -292,3 +292,5 @@ a.link-btn { text-decoration:none; }
 }
 .due { color:var(--red) !important; } .mr { margin-right:12px; }
 .side { overflow-y:auto; }
+.auth-or { display:flex; align-items:center; gap:12px; margin:18px 0 14px; color:var(--muted); font-size:12px; letter-spacing:.12em; text-transform:uppercase; }
+.auth-or::before, .auth-or::after { content:""; flex:1; height:1px; background:var(--gold-border); }

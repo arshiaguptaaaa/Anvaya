@@ -107,6 +107,7 @@ app.get(['/invite', '/reset'], (_req, res) => page(res, 'invite.html'));
 
 // ══ APIs ═══════════════════════════════════════════════════════════════
 app.use('/api', require('./routes/auth'));
+app.use('/api', require('./routes/google'));
 app.use('/api', require('./routes/public'));
 app.use('/api', require('./routes/files'));
 app.use('/api', require('./routes/cases'));

@@ -295,6 +295,92 @@ test('student: invite → password → intake with secure resume upload', async 
   assert.equal((await stu2.get(`/api/files/${ids.resume1.version_id}/download`)).status, 404);
 });
 
+// ═══ Google sign-in (existing accounts only) ═════════════════════════
+test('Google sign-in: existing accounts keep their role and limits; unknown, unverified, invited-only and tampered sign-ins refused', async () => {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'test-kid', alg: 'RS256', use: 'sig' };
+  const codes = new Map(); // code → { claims, challenge }
+  const sign = (claims) => {
+    const h = Buffer.from(JSON.stringify({ alg: 'RS256', kid: 'test-kid', typ: 'JWT' })).toString('base64url');
+    const p = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    return `${h}.${p}.${crypto.sign('RSA-SHA256', Buffer.from(`${h}.${p}`), privateKey).toString('base64url')}`;
+  };
+  const gPort = PORT + 2;
+  const fake = http.createServer((req, res) => {
+    if (req.url === '/certs') return res.end(JSON.stringify({ keys: [jwk] }));
+    let body = ''; req.on('data', (d) => { body += d; }); req.on('end', () => {
+      const q = new URLSearchParams(body); const c = codes.get(q.get('code'));
+      const pkceOk = c && crypto.createHash('sha256').update(q.get('code_verifier') || '').digest('base64url') === c.challenge;
+      if (!c || !pkceOk || q.get('client_secret') !== 'g-secret') { res.statusCode = 400; return res.end('{"error":"invalid_grant"}'); }
+      res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ id_token: sign(c.claims) }));
+    });
+  });
+  await new Promise((r) => fake.listen(gPort, r));
+  const anon = new Client();
+  assert.equal((await anon.get('/api/auth/providers')).json.google, false, 'hidden until configured');
+  Object.assign(process.env, { GOOGLE_CLIENT_ID: 'anvaya-test.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'g-secret',
+    GOOGLE_AUTH_URL: `http://localhost:${gPort}/auth`, GOOGLE_TOKEN_URL: `http://localhost:${gPort}/token`, GOOGLE_JWKS_URL: `http://localhost:${gPort}/certs` });
+  try {
+    assert.equal((await anon.get('/api/auth/providers')).json.google, true);
+    // Runs the browser side of the flow; `tweak` lets a case alter the claims Google returns.
+    const viaGoogle = async (client, area, email, tweak = (c) => c, { state } = {}) => {
+      const st = await client.get(`/api/auth/google/start?area=${area}`);
+      assert.equal(st.status, 303);
+      const u = new URL(st.location);
+      assert.equal(u.searchParams.get('code_challenge_method'), 'S256');
+      const code = crypto.randomUUID();
+      const now = Math.floor(Date.now() / 1000);
+      codes.set(code, { challenge: u.searchParams.get('code_challenge'), claims: tweak({ iss: 'https://accounts.google.com', aud: process.env.GOOGLE_CLIENT_ID,
+        sub: `g-${email}`, email, email_verified: true, nonce: u.searchParams.get('nonce'), iat: now, exp: now + 600 }) });
+      return client.get(`/api/auth/google/callback?code=${code}&state=${encodeURIComponent(state ?? u.searchParams.get('state'))}`);
+    };
+    const err = (r) => new URL(r.location, BASE).searchParams.get('error');
+
+    const ga = new Client();
+    const a = await viaGoogle(ga, 'admin', 'ADMIN@anvaya.test');
+    assert.equal(a.status, 200); assert.match(a.text, /url=\/admin"/);
+    await ga.refresh();
+    assert.equal((await ga.get('/api/auth/me')).json.user.role, 'admin');
+    assert.equal((await ga.get('/api/admin/overview')).status, 200);
+
+    const gm = new Client();
+    assert.equal((await viaGoogle(gm, 'mentor', 'priya@mentors.test')).status, 200);
+    await gm.refresh();
+    assert.equal((await gm.get('/api/auth/me')).json.user.role, 'mentor');
+    assert.equal((await gm.get('/mentor')).status, 200);
+    assert.equal((await gm.get('/api/admin/overview')).status, 403, 'mentor stays out of admin');
+    assert.equal((await gm.get('/admin')).status, 403);
+
+    const gs = new Client();
+    const sres = await viaGoogle(gs, 'student', 'rahul@students.test');
+    assert.match(sres.text, /url=\/student"/);
+    await gs.refresh();
+    assert.equal((await gs.get('/api/student/me')).status, 200);
+    assert.equal((await gs.get('/api/admin/students')).status, 403, 'student stays out of admin');
+    assert.equal((await gs.get('/api/mentor/bookings')).status, 403, 'student stays out of mentor');
+
+    assert.equal(err(await viaGoogle(new Client(), 'student', 'stranger@gmail.com')), 'google_no_account', 'no account creation');
+    const inv = await admin.post('/api/admin/students', { name: 'Invited Only', email: 'invited.only@students.test' });
+    await admin.post(`/api/admin/students/${inv.json.id}/invite`);
+    assert.equal(err(await viaGoogle(new Client(), 'student', 'invited.only@students.test')), 'google_no_account', 'must accept the invitation first');
+    assert.equal(err(await viaGoogle(new Client(), 'student', 'rahul@students.test', (c) => ({ ...c, email_verified: false }))), 'google_unverified');
+    assert.equal(err(await viaGoogle(new Client(), 'student', 'rahul@students.test', (c) => ({ ...c, aud: 'someone-else' }))), 'google_failed');
+    assert.equal(err(await viaGoogle(new Client(), 'student', 'rahul@students.test', (c) => ({ ...c, nonce: 'replayed' }))), 'google_failed');
+    assert.equal(err(await viaGoogle(new Client(), 'student', 'rahul@students.test', (c) => ({ ...c, iss: 'https://evil.example' }))), 'google_failed');
+    assert.equal(err(await viaGoogle(new Client(), 'student', 'rahul@students.test', (c) => c, { state: 'forged-state-value-000000000000' })), 'google_expired');
+    const noCookie = new Client(); const st = await noCookie.get('/api/auth/google/start?area=student'); noCookie.cookies = {};
+    assert.equal(err(await noCookie.get(`/api/auth/google/callback?code=x&state=${new URL(st.location).searchParams.get('state')}`)), 'google_expired', 'state must come from this browser');
+    const uid = (await db.one("select user_id from anvaya.students where email = 'neha@students.test'")).user_id;
+    await db.run('update anvaya.users set disabled_at = now() where id = $1', [uid]);
+    assert.equal(err(await viaGoogle(new Client(), 'student', 'neha@students.test')), 'disabled');
+    await db.run('update anvaya.users set disabled_at = null where id = $1', [uid]);
+    assert.ok((await db.one("select count(*)::int n from anvaya.audit_log where action = 'login_google'")).n >= 3);
+  } finally {
+    for (const k of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_AUTH_URL', 'GOOGLE_TOKEN_URL', 'GOOGLE_JWKS_URL']) delete process.env[k];
+    fake.close();
+  }
+});
+
 test('subscription purchase via Razorpay: verified signature, idempotent webhook, access granted', async () => {
   assert.equal((await stu1.get('/api/student/me')).json.subscription, null);
   assert.equal((await stu1.get('/api/student/syllabus')).json.locked, true);
