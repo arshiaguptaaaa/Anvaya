@@ -908,6 +908,40 @@ test('public payment page: server prices the plan, verifies Razorpay, and activa
   assert.equal(Number((await db.one('select count(*) n from anvaya.payments where order_id = $1', [o.id])).n), 1);
 });
 
+test('existing payment page (public key only): verified webhook activates the purchase automatically; mismatches are flagged, not activated', async () => {
+  const hook = (payment, id) => {
+    const body = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: payment } }, created_at: Date.now() });
+    const sig = crypto.createHmac('sha256', 'whsec-test').update(body).digest('hex');
+    return fetch(`${BASE}/api/webhooks/razorpay`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': sig, 'X-Razorpay-Event-Id': id } });
+  };
+  const prod = (await admin.get('/api/admin/products')).json.find((x) => x.public_key === '500mba');
+  const pay = { id: 'pay_page_1', order_id: null, amount: rupees(450), status: 'captured', method: 'upi', email: 'Riya.Page@Buyers.test', contact: '+919800000001', notes: { plan: prod.name, sessions: '1 × 30 min' }, fee: 900, tax: 162 };
+  const forged = await fetch(`${BASE}/api/webhooks/razorpay`, { method: 'POST', body: JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { ...pay, id: 'pay_forged' } } } }), headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': 'bad', 'X-Razorpay-Event-Id': 'evt_forged' } });
+  assert.equal(forged.status, 401, 'unsigned events are ignored');
+  const before = mailer.sent.length;
+  assert.equal((await hook(pay, 'evt_page_1')).status, 200);
+  await jobs.processDue({ kinds: ['payments.webhook', 'email.send'], limit: 50 });
+  const st = await db.one("select * from anvaya.students where email = 'riya.page@buyers.test'");
+  assert.ok(st, 'student created from the payment');
+  const o = await db.one("select * from anvaya.orders where student_id = $1", [st.id]);
+  assert.equal(o.status, 'paid'); assert.equal(o.source, 'public_page_direct'); assert.equal(Number(o.discount_paise), rupees(50));
+  assert.ok(await db.one('select 1 from anvaya.service_cases where order_id = $1', [o.id]), 'service opened');
+  const mails = mailer.sent.slice(before).filter((m) => m.to === 'riya.page@buyers.test');
+  assert.ok(mails.some((m) => /Payment received/.test(m.subject)) && mails.some((m) => /token=/.test(m.text)), 'confirmation + account invite');
+  // repeated delivery of the same payment (new event id) changes nothing
+  await hook(pay, 'evt_page_1_retry');
+  await jobs.processDue({ kinds: ['payments.webhook', 'email.send'], limit: 50 });
+  assert.equal(Number((await db.one("select count(*) n from anvaya.payments where provider_payment_id = 'pay_page_1'")).n), 1);
+  assert.equal(Number((await db.one('select count(*) n from anvaya.orders where student_id = $1', [st.id])).n), 1);
+  // too little paid, or an unknown plan: flagged for staff, nothing activated
+  await hook({ ...pay, id: 'pay_page_low', amount: rupees(100), email: 'low@buyers.test' }, 'evt_low');
+  await hook({ ...pay, id: 'pay_page_unknown', email: 'unk@buyers.test', notes: { plan: 'Something else' } }, 'evt_unk');
+  await jobs.processDue({ kinds: ['payments.webhook'], limit: 50 });
+  assert.ok(!(await db.one("select 1 from anvaya.students where email in ('low@buyers.test','unk@buyers.test')")), 'nothing activated for mismatches');
+  const flags = await db.all("select title from anvaya.tasks where dedupe_key like 'page-pay-flag:%'");
+  assert.ok(flags.some((f) => /pay_page_low.*below/.test(f.title)) && flags.some((f) => /pay_page_unknown.*not recognised/.test(f.title)));
+});
+
 test('deactivating a mentor ends sessions immediately; disabled staff cannot sign in', async () => {
   await admin.post(`/api/admin/mentors/${ids.mentorB}/deactivate`);
   assert.equal((await mentorB.get('/api/mentor/bookings')).status, 401);

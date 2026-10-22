@@ -244,9 +244,10 @@ jobs.register('payments.webhook', async ({ webhookEventId }) => {
   try {
     const p = ev.payload;
     const pay = p.payload?.payment?.entity;
-    if ((p.event === 'payment.captured' || p.event === 'order.paid') && pay?.order_id) {
-      const order = await db.one("select * from anvaya.orders where provider = 'razorpay' and provider_order_id = $1", [pay.order_id]);
+    if ((p.event === 'payment.captured' || p.event === 'order.paid') && pay?.id) {
+      const order = pay.order_id && await db.one("select * from anvaya.orders where provider = 'razorpay' and provider_order_id = $1", [pay.order_id]);
       if (order) await markPaid(order.id, { provider: 'razorpay', providerPaymentId: pay.id, amountPaise: pay.amount, feePaise: pay.fee || 0, taxPaise: pay.tax || 0, method: pay.method || '' });
+      else if (p.event === 'payment.captured') await recordPagePayment(pay);
     } else if (p.event === 'payment.failed' && pay?.order_id) {
       const order = await db.one("select id from anvaya.orders where provider = 'razorpay' and provider_order_id = $1", [pay.order_id]);
       if (order) await markFailed(order.id, pay.error_description || 'Payment failed');
@@ -263,6 +264,38 @@ jobs.register('payments.webhook', async ({ webhookEventId }) => {
     throw e;
   }
 });
+
+/**
+ * A captured payment made directly on the public payment page (browser Checkout with only the public key, no
+ * server order). Trusted because the webhook signature was verified with RAZORPAY_WEBHOOK_SECRET. The plan comes
+ * from the payment's notes.plan (the page sets it), and the captured amount must cover that plan's price minus at
+ * most the page's referral discount (10%, capped at ₹150). Anything that doesn't match is flagged for staff and
+ * nothing is activated.
+ */
+async function recordPagePayment(pay) {
+  if (await db.one("select 1 from anvaya.payments where provider = 'razorpay' and provider_payment_id = $1", [pay.id])) return;
+  const ops = require('./ops');
+  const email = String(pay.email || '').trim().toLowerCase();
+  const planName = String(pay.notes?.plan || '').trim();
+  const product = planName && await db.one('select * from anvaya.products where name = $1 and public_key is not null and active', [planName]);
+  const rs = (x) => `₹${(Number(x) / 100).toLocaleString('en-IN')}`;
+  const flag = async (why) => {
+    await ops.createTask({ title: `Check Razorpay payment ${pay.id} (${rs(pay.amount)}, ${email || 'no email'}): ${why}`, source: 'payment', dedupeKey: `page-pay-flag:${pay.id}` });
+    console.error('[page-payment]', pay.id, why);
+  };
+  if (!product) return flag(`plan “${planName || 'missing'}” not recognised`);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return flag('no valid email on the payment');
+  const minAllowed = Number(product.price_paise) - Math.min(Math.round(Number(product.price_paise) * 0.10 / 100) * 100, 15000);
+  if (Number(pay.amount) < minAllowed) return flag(`amount below ${product.name} price`);
+  const order = await db.tx(async (t) => {
+    let st = await t.one('select id from anvaya.students where lower(email) = $1 order by id limit 1', [email]);
+    if (!st) st = await t.one(`insert into anvaya.students (name, email, phone, status) values ($1,$2,$3,'active') returning id`, [pay.notes?.name || email.split('@')[0], email, String(pay.contact || '')]);
+    return t.one(`insert into anvaya.orders (student_id, product_id, description, amount_paise, provider, provider_order_id, source, discount_paise)
+      values ($1,$2,$3,$4,'razorpay',$5,'public_page_direct',$6) returning id`,
+    [st.id, product.id, product.name, pay.amount, pay.order_id || null, Math.max(0, Number(product.price_paise) - Number(pay.amount))]);
+  });
+  await markPaid(order.id, { provider: 'razorpay', providerPaymentId: pay.id, amountPaise: pay.amount, feePaise: pay.fee || 0, taxPaise: pay.tax || 0, method: pay.method || '' });
+}
 
 /** Reconciles orders whose outcome we never heard about (missed webhook, closed tab). */
 jobs.register('payments.reconcile', async () => {
