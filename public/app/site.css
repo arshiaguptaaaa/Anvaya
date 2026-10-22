@@ -1,0 +1,73 @@
+/* Anvaya public page polish, layered on the original brochure (its HTML stays as supplied).
+   1. Readable body copy  2. Section order: proof before the pitch  3. Plans: price → button → inclusions
+   4. Phone: menu, tighter rhythm, one-line header button, full-width buttons. */
+
+/* 1. Body copy was #7a6e5e on navy (3.8:1, below the 4.5:1 reading minimum); this is 5.6:1. */
+html:root { --muted: #9a8d78; }
+
+/* 2. Trust first: who got results (logos, Sanjana) right after the promise; then how it works, why it's
+   different, the offers, the free chat for anyone unsure, and the FAQ. Pure CSS order: no HTML moved. */
+body { display: flex; flex-direction: column; }
+body > nav { order: 0; }
+.hero, .hero + .divider { order: 10; }
+.proof-section, .proof-section + .divider { order: 20; }
+#testimonials, #testimonials + .divider { order: 30; }
+#process, #process + .divider { order: 40; }
+#different, .quote-band { order: 50; }
+#plans, #plans + .divider { order: 60; }
+.flagship-section, .flagship-section + .divider { order: 70; }
+.other-services-section, .other-services-section + .divider { order: 80; }
+#chat, #chat + .divider { order: 90; }
+#faq, .cta-band { order: 100; }
+body > footer { order: 110; }
+#lightbox { order: 120; }
+
+/* 3. Plans: the button sits right under the price instead of below eight feature cards; long inclusion
+   lists show the first four with "See all". */
+.plan-card { display: flex; flex-direction: column; }
+.plan-card .plan-head { order: 1; }
+.plan-card .plan-cta-area { order: 2; margin-top: 4px; }
+.plan-card .plan-features-area { order: 3; }
+.plan-card .plan-includes { order: 4; }
+.feature-cards.is-folded > .feat-card:nth-child(n+5) { display: none !important; }
+.feat-more { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; background: none; border: 1px solid var(--border, rgba(201,168,76,.18));
+  color: var(--gold, #c9a84c); border-radius: 999px; padding: 9px 18px; font: inherit; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; transition: border-color .2s, background .2s; }
+.feat-more:hover { border-color: var(--gold, #c9a84c); background: rgba(201,168,76,.06); }
+
+/* 4. Phone menu */
+.nav-burger { display: none; width: 42px; height: 42px; border: 1px solid var(--border, rgba(201,168,76,.18)); border-radius: 10px; background: transparent; cursor: pointer;
+  align-items: center; justify-content: center; flex-direction: column; gap: 5px; margin-left: 10px; }
+.nav-burger i { display: block; width: 18px; height: 1.5px; background: var(--ivory, #f4ede0); transition: transform .25s, opacity .25s; }
+.nav-burger[aria-expanded="true"] i:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
+.nav-burger[aria-expanded="true"] i:nth-child(2) { opacity: 0; }
+.nav-burger[aria-expanded="true"] i:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); }
+.nav-right { display: flex; align-items: center; }
+.nav-sheet { position: fixed; left: 0; right: 0; top: 62px; z-index: 499; background: rgba(8,17,31,.98); backdrop-filter: blur(24px);
+  border-bottom: 1px solid var(--border, rgba(201,168,76,.18)); padding: 10px 24px 24px; transform: translateY(-8px); opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; }
+.nav-sheet.open { opacity: 1; transform: none; pointer-events: auto; }
+.nav-sheet a { display: block; padding: 15px 2px; border-bottom: 1px solid rgba(201,168,76,.1); color: var(--ivory-2, #d9cdb8); text-decoration: none;
+  font-size: 13px; letter-spacing: .14em; text-transform: uppercase; }
+.nav-sheet a:last-child { border-bottom: 0; margin-top: 16px; text-align: center; background: var(--gold, #c9a84c); color: var(--navy, #08111f); border-radius: 4px; font-weight: 700; }
+
+@media (max-width: 960px) {
+  .nav-burger { display: inline-flex; }
+}
+@media (max-width: 600px) {
+  .nav-tagline { display: none; }
+  .nav-cta { padding: 10px 14px; letter-spacing: .12em; white-space: nowrap; }
+  /* rhythm: the page was ~25 phone screens long, largely from 88–130px gaps above and below every section */
+  body > section:not(.hero) { padding-top: 64px !important; padding-bottom: 64px !important; }
+  .hero { padding-bottom: 56px !important; }
+  .hero-btns { display: grid !important; grid-template-columns: 1fr; gap: 12px; }
+  .hero-btns a { width: 100%; text-align: center; justify-content: center; box-sizing: border-box; }
+  p { line-height: 1.75; }
+  .feature-cards { gap: 8px !important; }
+  .feat-card { padding: 14px 16px !important; display: grid !important; grid-template-columns: 22px 1fr; column-gap: 10px; align-items: start; }
+  .feat-card-icon { grid-row: span 2; margin: 2px 0 0 !important; font-size: 14px !important; }
+  .feat-card-title { margin: 0 0 4px !important; font-size: 14px !important; }
+  .feat-card-body { font-size: 12.5px !important; line-height: 1.6 !important; }
+}
+@media (max-width: 380px) {
+  .nav-cta { font-size: 9px; padding: 9px 10px; }
+  .nav-name { font-size: 18px !important; letter-spacing: .14em !important; }
+}

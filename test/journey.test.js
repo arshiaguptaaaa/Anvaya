@@ -95,6 +95,7 @@ const ORIGINAL_SHA = '05995cd3a1e0fa7719fd871937c3daca475666019061eaa71e628d09a5
 const LEAD_TAG = '<script src="/app/lead-capture.js" defer></script>\n';
 // Content edits approved by the owner, applied on top of the supplied brochure: [now, originally].
 const APPROVED_EDITS = [
+  ['</script>\n<link rel="stylesheet" href="/app/site.css">\n<script src="/app/site.js" defer></script>\n</head>', '</script>\n</head>'], // page polish (site.css / site.js)
   ['<span class="hstat-n">500</span><span class="hstat-l">Resumes reviewed</span>', '<span class="hstat-n">50+</span><span class="hstat-l">Resumes reviewed</span>'],
   [/<style>\n\/\* TESTIMONIALS \*\/[\s\S]*?<\/script>\n<\/head>/, '</head>'], // testimonial styles + scroll-arrival polish
   ['\n          <div class="plan-cat">Complete Resume Build</div>', '\n          <div class="plan-badge">&#x2B21; &nbsp;Early Access &mdash; Ends 15th May</div>\n          <div class="plan-cat">Complete Resume Build</div>'],
