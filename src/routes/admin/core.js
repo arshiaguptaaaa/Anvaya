@@ -94,7 +94,7 @@ r.post('/freechat/host-self', adminOnly, wrap(async (req, res) => {
   let m = await db.one('select id from anvaya.mentors where user_id = $1', [u.id]);
   if (!m) {
     m = await db.one(`insert into anvaya.mentors (user_id, name, status, profile_completed, session_duration, listed, expertise)
-      values ($1,$2,'active',true,15,false,'Free chats') returning id`, [u.id, u.name || 'Anvaya team']);
+      values ($1,'Anvaya team','active',true,15,false,'Free chats') returning id`, [u.id]);
     for (const wd of [1, 2, 3, 4, 5]) await db.run("insert into anvaya.availability (mentor_id, weekday, start_time, end_time) values ($1,$2,'18:00','20:00')", [m.id, wd]);
   }
   await settings.set('freechat_mentor_id', m.id, u.id);

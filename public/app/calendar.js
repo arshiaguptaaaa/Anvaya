@@ -35,7 +35,7 @@
       gcals: store.get('gcals', null), // null = the calendars chosen in Google settings
     };
     if (staff && st.mentorId && !mentors.some((m) => String(m.id) === st.mentorId)) st.mentorId = '';
-    let avail = null, data = { bookings: [], live: [], freechats: [] }, g = { connected: false, calendars: [], events: [], shown: [] }, gInfo = null;
+    let avail = null, data = { bookings: [], live: [], freechats: [] }, pend = { bookings: [], freechats: [] }, g = { connected: false, calendars: [], events: [], shown: [] }, gInfo = null;
     const grace = (settings.noshow_grace_minutes ?? 15) * 60e3;
 
     main.innerHTML = `<div class="gc reveal">
@@ -78,12 +78,15 @@
       const [from, to] = range();
       const mq = st.mentorId ? `&mentor_id=${st.mentorId}` : '';
       const gq = st.gcals ? `&calendars=${encodeURIComponent(st.gcals.join(','))}` : '';
-      const [d, a, ge] = await Promise.all([
+      // "Needs action" looks past the visible range: a week back and ~two months ahead, so no request is missed.
+      const qFrom = new Date(Date.now() - 7 * DAY).toISOString(), qTo = new Date(Date.now() + 54 * DAY).toISOString();
+      const [d, a, ge, pq] = await Promise.all([
         api(`/api/calendar/events?from=${encodeURIComponent(iso(from))}&to=${encodeURIComponent(iso(to))}${mq}`),
         st.mentorId ? api(`/api/calendar/availability?mentor_id=${st.mentorId}`) : Promise.resolve(null),
         api(`/api/calendar/google/events?from=${encodeURIComponent(iso(from))}&to=${encodeURIComponent(iso(to))}${gq}`).catch((e) => ({ connected: true, error: e.message, calendars: [], events: [], shown: [] })),
+        api(`/api/calendar/events?from=${encodeURIComponent(qFrom)}&to=${encodeURIComponent(qTo)}${mq}`).catch(() => null),
       ]);
-      data = d; avail = a; g = ge;
+      data = d; avail = a; g = ge; pend = pq || d;
       drawAll();
     }
     function drawAll() { draw(); mini(); queue(); layers(); hours(); }
@@ -195,8 +198,8 @@
     }
     function queue() {
       const now = Date.now();
-      const need = data.bookings.filter((b) => (b.status === 'requested' && !b.proposed) || (b.status === 'scheduled' && b.calendar_status === 'failed') || (b.status === 'scheduled' && new Date(b.scheduled_at).getTime() + grace < now) || b.needs_review);
-      const chats = (data.freechats || []).filter((f) => f.status === 'requested' || (f.status === 'scheduled' && f.calendar_status === 'failed') || (f.status === 'scheduled' && new Date(f.ends_at).getTime() < now));
+      const need = pend.bookings.filter((b) => (b.status === 'requested' && !b.proposed) || (b.status === 'scheduled' && b.calendar_status === 'failed') || (b.status === 'scheduled' && new Date(b.scheduled_at).getTime() + grace < now) || b.needs_review);
+      const chats = (pend.freechats || []).filter((f) => f.status === 'requested' || (f.status === 'scheduled' && f.calendar_status === 'failed') || (f.status === 'scheduled' && new Date(f.ends_at).getTime() < now));
       const total = need.length + chats.length;
       $('#gcQueue').innerHTML = total ? `<div class="gc-sec"><div class="gc-sec-h">Needs action <span class="gc-badge">${total}</span></div>${chats.slice(0, 6).map((f) => {
         const why = f.status === 'requested' ? 'Free chat · approve or decline' : f.calendar_status === 'failed' ? 'Free chat · Meet failed' : 'Free chat · how did it go?';
@@ -352,7 +355,7 @@
       return null;
     }
     async function bookingModal(bid) {
-      const b = data.bookings.find((x) => x.id === bid); if (!b) return;
+      const b = data.bookings.find((x) => x.id === bid) || pend.bookings.find((x) => x.id === bid); if (!b) return;
       const [stTxt] = stateOf(b);
       const now = Date.now(), start = new Date(b.scheduled_at).getTime(), afterGrace = now >= start + grace;
       const log = staff ? await api(`/api/admin/email-log?booking_id=${b.id}`).catch(() => []) : [];
@@ -399,7 +402,7 @@
       }
     }
     function chatModal(cid) {
-      const f = data.freechats.find((x) => x.id === cid); if (!f) return;
+      const f = data.freechats.find((x) => x.id === cid) || (pend.freechats || []).find((x) => x.id === cid); if (!f) return;
       const now = Date.now(), started = now >= new Date(f.scheduled_at).getTime();
       const state = { requested: 'Requested · awaiting approval', scheduled: 'Confirmed', completed: 'Completed', no_show: 'Didn’t join', cancelled: 'Cancelled' }[f.status];
       const ui = modal(`<div class="eyebrow">Free 15-min chat · from the website</div><div class="row-between mb-2"><h2 class="h2">${esc(f.name)}</h2><span class="pill">${esc(state)}</span></div>
