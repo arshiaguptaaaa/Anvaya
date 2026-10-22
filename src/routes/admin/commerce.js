@@ -20,6 +20,7 @@ const productFields = fields({
   billing_period: (x) => v.oneOf(x, PERIODS, 'Billing period'),
   active: (x) => v.bool(x),
   digital_document_id: (x) => v.id(x, 'Document'),
+  public_key: (x) => { const s = v.str(x, { max: 40, label: 'Public page key' }); if (s && !/^[a-z0-9_-]+$/i.test(s)) throw bad('Public page key: letters, numbers, - or _ only.'); return s || null; },
   is_test: (x) => v.bool(x),
 }, ['kind', 'name', 'price_paise']);
 

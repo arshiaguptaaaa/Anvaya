@@ -63,7 +63,7 @@ app.use(['/api', '/admin', '/mentor', '/student', '/invite', '/reset', '/login']
   if (IS_PROD) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
-const CSRF_EXEMPT = (p) => ['/auth/login', '/auth/forgot', '/public/leads'].includes(p) || p.startsWith('/invites/') || p.startsWith('/_storage/');
+const CSRF_EXEMPT = (p) => ['/auth/login', '/auth/forgot', '/public/leads', '/public/checkout', '/public/checkout/verify'].includes(p) || p.startsWith('/invites/') || p.startsWith('/_storage/');
 app.use('/api', (req, res, next) => (CSRF_EXEMPT(req.path) ? next() : sec.csrfProtect(req, res, next)));
 // Drain the job queue in the background after API responses (Vercel keeps the function alive via waitUntil).
 app.use('/api', (_req, res, next) => { res.on('finish', () => jobs.kick()); next(); });

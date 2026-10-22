@@ -861,6 +861,47 @@ test('mentor services: submitted → admin-approved → bookable with its own du
   assert.ok((await mentorA.get('/api/mentor/agenda')).json.every((x) => ['scheduled', 'requested'].includes(x.status)));
 });
 
+test('public payment page: server prices the plan, verifies Razorpay, and activates access + onboarding without manual steps', async () => {
+  const prod = await admin.post('/api/admin/products', { kind: 'coaching_package', name: 'MBA Planning & Strategy Call', price_paise: rupees(500), active: true, public_key: '500mba' });
+  assert.equal(prod.status, 201, prod.text);
+  const anon = new Client();
+  const plans = (await anon.get('/api/public/checkout/plans')).json;
+  assert.ok(plans.plans.some((x) => x.key === '500mba' && Number(x.price_paise) === rupees(500)));
+  // CORS: the page lives on the main site
+  const pre = await fetch(`${BASE}/api/public/checkout`, { method: 'OPTIONS', headers: { Origin: 'https://anvayacareers.in', 'Access-Control-Request-Method': 'POST' } });
+  assert.equal(pre.status, 204);
+  // the browser can't choose the price: amount comes from the product, referral discount from the server rule
+  const co = await anon.post('/api/public/checkout', { plan_key: '500mba', name: 'Ishaan Verma', email: 'Ishaan@Buyers.test', phone: '+91 98111 00000', ref_code: 'FRIEND10', amount: 1 });
+  assert.equal(co.status, 201, co.text);
+  assert.equal(co.json.amount_paise, rupees(450)); assert.equal(co.json.discount_paise, rupees(50));
+  assert.equal(co.json.key, 'rzp_fake_test');
+  assert.equal((await anon.post('/api/public/checkout', { plan_key: 'nope', name: 'x', email: 'x@y.test', phone: '9999999999' })).status, 400);
+  // forged signature refused; real one marks paid
+  const pay = fakePay(co.json.razorpay_order_id, rupees(450));
+  assert.equal((await anon.post('/api/public/checkout/verify', { ...pay, razorpay_signature: 'f'.repeat(64) })).status, 400);
+  const before = mailer.sent.length;
+  const v1 = await anon.post('/api/public/checkout/verify', pay);
+  assert.equal(v1.json.status, 'paid', v1.text);
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  const mails = mailer.sent.slice(before).filter((m) => m.to === 'ishaan@buyers.test');
+  assert.ok(mails.some((m) => /Payment received: MBA Planning/.test(m.subject)), 'confirmation');
+  assert.ok(mails.some((m) => /token=/.test(m.text)), 'account invitation');
+  const st = await db.one("select * from anvaya.students where email = 'ishaan@buyers.test'");
+  const o = await db.one("select * from anvaya.orders where provider_order_id = $1", [co.json.razorpay_order_id]);
+  assert.equal(o.status, 'paid'); assert.equal(o.source, 'public_page'); assert.equal(o.ref_code, 'FRIEND10'); assert.equal(Number(o.discount_paise), rupees(50));
+  assert.ok(st.onboarding_started_at && st.user_id);
+  assert.ok(await db.one("select 1 from anvaya.service_cases where order_id = $1", [o.id]), 'purchased service opened automatically');
+  const ws = (await admin.get(`/api/admin/students/${st.id}/workspace`)).json;
+  assert.ok(ws.timeline.some((e) => e.kind === 'system' && /verified by Razorpay/.test(e.body)));
+  // the webhook arriving afterwards changes nothing (idempotent)
+  const n = mailer.sent.length;
+  await anon.post('/api/public/checkout/verify', pay);
+  await payments.afterPayment(o.id, { provider: 'razorpay' });
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  assert.equal(mailer.sent.slice(n).filter((m) => m.to === 'ishaan@buyers.test').length, 0);
+  assert.equal(Number((await db.one('select count(*) n from anvaya.payments where order_id = $1', [o.id])).n), 1);
+});
+
 test('deactivating a mentor ends sessions immediately; disabled staff cannot sign in', async () => {
   await admin.post(`/api/admin/mentors/${ids.mentorB}/deactivate`);
   assert.equal((await mentorB.get('/api/mentor/bookings')).status, 401);

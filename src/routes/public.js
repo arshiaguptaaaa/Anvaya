@@ -31,7 +31,7 @@ jobs.register('leads.sheet_sync', async ({ leadId }) => {
 const allowedOrigins = () => [BASE_URL(), ...(process.env.EXTRA_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean)];
 // The brochure may live on another origin (split setup: anvayacareers.in → app.anvayacareers.in), so this one
 // endpoint answers CORS for the configured origins only. No cookies are involved (credentials: 'omit').
-r.use('/public/leads', (req, res, next) => {
+r.use(['/public/leads', '/public/checkout', '/public/checkout/verify'], (req, res, next) => {
   const origin = req.get('origin');
   if (origin && allowedOrigins().includes(origin)) res.set({ 'Access-Control-Allow-Origin': origin, Vary: 'Origin' });
   if (req.method !== 'OPTIONS') return next();
@@ -62,6 +62,56 @@ r.post('/public/leads', leadLimiter, wrap(async (req, res) => {
   });
   res.status(201).json({ ok: true, id: lead.id });
   jobs.kick();
+}));
+
+// ── Public payment page → server checkout ──────────────────────────────
+// The page sends only the plan key and the buyer's details. Price and referral discount are decided here,
+// Razorpay's signature is verified here (and again by the webhook), and fulfilment, the confirmation email,
+// the account invitation and onboarding all run automatically once the payment is verified.
+const payments = require('../lib/payments');
+const REF_PCT = 0.10, REF_CAP_PAISE = 15000; // 10% off, capped at ₹150 (same rule the page shows)
+const checkoutLimiter = sec.rateLimiter({ name: 'public-checkout', windowMs: 60 * 60e3, max: 30, key: (req) => req.ip });
+r.get('/public/checkout/plans', wrap(async (_req, res) => {
+  res.json({ configured: payments.configured(), plans: await db.all(`select public_key as key, name, price_paise from anvaya.products
+    where public_key is not null and active order by price_paise`) });
+}));
+r.post('/public/checkout', checkoutLimiter, wrap(async (req, res) => {
+  if (!payments.configured()) throw new HttpError(503, 'Online payment isn’t available right now. Please message the Anvaya team.');
+  const b = req.body || {};
+  const p = await db.one('select * from anvaya.products where public_key = $1 and active', [v.str(b.plan_key, { max: 40, required: true, label: 'Plan' })]);
+  if (!p) throw bad('That plan isn’t available.');
+  const name = v.str(b.name, { max: 120, required: true, label: 'Name' });
+  const email = v.email(b.email);
+  const phone = v.str(b.phone, { max: 40, required: true, label: 'Phone' });
+  if (!/^[+\d][\d\s()-]{6,}$/.test(phone)) throw bad('Please enter a valid phone number.');
+  const ref = v.str(b.ref_code, { max: 40 }).replace(/[^a-z0-9_-]/gi, '');
+  const discount = ref ? Math.min(Math.round(Number(p.price_paise) * REF_PCT / 100) * 100, REF_CAP_PAISE) : 0;
+  const amount = Number(p.price_paise) - discount;
+  // Find or create the student by email (never by phone alone); link to an existing lead with the same phone.
+  const student = await db.tx(async (t) => {
+    let s = await t.one('select id from anvaya.students where lower(email) = lower($1) order by id limit 1', [email]);
+    if (!s) {
+      s = await t.one(`insert into anvaya.students (name, email, phone, status) values ($1, lower($2), $3, 'active') returning id`, [name, email, phone]);
+      await t.run("update anvaya.leads set student_id = $1, status = 'converted' where student_id is null and phone = $2 and status <> 'lost'", [s.id, phone]);
+    }
+    return s;
+  });
+  const reuse = await db.one(`select * from anvaya.orders where student_id = $1 and product_id = $2 and status = 'created' and amount_paise = $3
+    and provider = 'razorpay' and source = 'public_page' and created_at > now() - interval '30 minutes' order by id desc limit 1`, [student.id, p.id, amount]);
+  const order = reuse || await payments.createOrder({ studentId: student.id, product: p, amountPaise: amount, description: p.name, userId: null });
+  if (!reuse) await db.run("update anvaya.orders set ref_code = $2, discount_paise = $3, source = 'public_page' where id = $1", [order.id, ref, discount]);
+  res.status(201).json({ key: payments.checkoutConfig().keyId, razorpay_order_id: order.provider_order_id, amount_paise: amount, discount_paise: discount, currency: 'INR', plan: p.name });
+}));
+r.post('/public/checkout/verify', checkoutLimiter, wrap(async (req, res) => {
+  const b = req.body || {};
+  const order = await db.one("select * from anvaya.orders where provider = 'razorpay' and provider_order_id = $1 and source = 'public_page'", [String(b.razorpay_order_id || '')]);
+  if (!order) throw new HttpError(404, 'Order not found.');
+  if (!payments.verifyCheckoutSignature(b)) throw new HttpError(400, 'Payment verification failed. If money was deducted, it will be reconciled automatically.');
+  const pays = await payments.rzp('GET', `/orders/${order.provider_order_id}/payments`);
+  const pay = (pays.items || []).find((x) => x.id === b.razorpay_payment_id && x.status === 'captured');
+  if (!pay) return res.json({ ok: true, status: 'processing' }); // the webhook / reconciliation finishes it
+  await payments.markPaid(order.id, { provider: 'razorpay', providerPaymentId: pay.id, amountPaise: pay.amount, feePaise: pay.fee || 0, taxPaise: pay.tax || 0, method: pay.method });
+  res.json({ ok: true, status: 'paid' });
 }));
 
 module.exports = r;
