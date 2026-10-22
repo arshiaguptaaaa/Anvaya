@@ -164,6 +164,7 @@ jobs.register('calendar.sync', async ({ bookingId, reason }) => {
     throw e; // retried with backoff; no confirmation is sent without a real Meet link
   }
   await db.run("update anvaya.tasks set status = 'done', done_at = now() where dedupe_key like $1 and status = 'open'", [`calfail:${bookingId}:%`]);
+  if (reason === 'backfill') return { synced: true, silent: true }; // confirmed before the calendar was connected: already emailed
   const s = await load(bookingId);
   const k = new Date(s.scheduled_at).getTime();
   const ics = [{ filename: 'anvaya-session.ics', content: buildIcs(s), contentType: 'text/calendar; method=REQUEST' }];
@@ -188,6 +189,21 @@ jobs.register('calendar.cancel', async ({ bookingId }) => {
   await db.run("update anvaya.bookings set calendar_status = 'cancelled' where id = $1", [bookingId]);
   return { cancelled: true };
 });
+
+/**
+ * After a host connects (or changes) Google Calendar: put every upcoming confirmed session they host into it.
+ * Sessions confirmed before the connection get their event + Meet link silently (they were already emailed);
+ * ones still waiting on a Meet link get the normal confirmation once it exists.
+ */
+async function backfillHost(userId) {
+  const fallback = Number(await settings.get('calendar_host_user_id')) || null;
+  const rows = await db.all(`select b.id, b.calendar_status from anvaya.bookings b join anvaya.mentors m on m.id = b.mentor_id
+    where b.status = 'scheduled' and b.scheduled_at > now() and b.calendar_status <> 'synced'
+      and (m.user_id = $1 or ($2::bigint = $1 and not exists (select 1 from anvaya.calendar_connections c where c.user_id = m.user_id and c.status = 'active')))
+    order by b.scheduled_at limit 200`, [userId, fallback]);
+  for (const r of rows) await scheduleSync(r.id, r.calendar_status === 'none' ? 'backfill' : 'confirm');
+  return rows.length;
+}
 
 /** After a time change by anyone: update the calendar event + notify both (confirmed), or re-notify the host (request). */
 async function afterReschedule(bookingId) {
@@ -308,5 +324,6 @@ async function reverseNoShow(eventId, user, reason) {
   return ev;
 }
 
-module.exports = { assertCanBook, holdUntil, notifyRequested, approve, decline, suggest, acceptProposal, scheduleSync, afterReschedule, cancel, expireHolds,
+module.exports = {
+  backfillHost, assertCanBook, holdUntil, notifyRequested, approve, decline, suggest, acceptProposal, scheduleSync, afterReschedule, cancel, expireHolds,
   markOutcome, dispute, reverseNoShow, buildIcs, icsSig, icsUrl, gcalUrl, load };

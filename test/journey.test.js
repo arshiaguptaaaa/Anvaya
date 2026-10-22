@@ -1147,6 +1147,28 @@ test('Google Calendar connect: the callback works without the (Strict) session c
   await db.run('delete from anvaya.calendar_connections');
 });
 
+test('Google sync: a host sees only their own Google events; sessions confirmed before connecting are added silently, with a Meet link', async () => {
+  const from = new Date().toISOString(), to = new Date(Date.now() + 30 * 86400e3).toISOString();
+  gcal.fake.items = [{ id: 'own1', summary: 'Private dentist appointment', start: { dateTime: new Date(Date.now() + 86400e3).toISOString() }, end: { dateTime: new Date(Date.now() + 90000e3).toISOString() } }];
+  const mine = (await mentorA.get(`/api/calendar/google/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)).json;
+  assert.equal(mine.connected, true); assert.equal(mine.events[0].title, 'Private dentist appointment');
+  assert.equal((await stu1.get(`/api/calendar/google/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)).status, 403, 'students never reach host calendars');
+  assert.ok(!JSON.stringify((await stu1.get(`/api/student/mentors/${ids.mentorA}/slots`)).json).includes('dentist'), 'students only get slot times');
+  gcal.fake.items = [];
+  // a session confirmed while no calendar was connected (calendar_status none) → backfill on Save: event + Meet link, no new emails
+  const slot = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.at(-3);
+  const bid = await book(stu2, slot);
+  await db.run("update anvaya.bookings set status = 'scheduled', hold_expires_at = null, calendar_status = 'none' where id = $1", [bid]);
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  const before = mailer.sent.length;
+  const saved = await mentorA.put('/api/calendar/google', { busy_calendar_ids: ['primary'], booking_calendar_id: 'primary' });
+  assert.equal(saved.status, 200, saved.text); assert.ok(saved.json.synced >= 1, 'saving calendar settings adds missing sessions');
+  const b = await db.one('select calendar_status, meet_link, google_event_id from anvaya.bookings where id = $1', [bid]);
+  assert.equal(b.calendar_status, 'synced'); assert.match(b.meet_link, /meet\.google\.com/); assert.ok(b.google_event_id);
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  assert.ok(!mailer.sent.slice(before).some((m) => /^Confirmed/.test(m.subject)), 'no duplicate confirmation for an already-confirmed session');
+});
+
 test('availability: weekly hours, blocked dates and Google busy times shape the bookable slots; students never see private details', async () => {
   const avail = (await mentorA.get('/api/calendar/availability')).json;
   assert.ok(avail.weekly.length >= 7);

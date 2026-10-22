@@ -70,6 +70,7 @@ r.get('/google/callback', wrap(async (req, res) => {
     const out = await gcal.exchangeCode(String(req.query.code || ''));
     await gcal.saveConnection(u.id, out);
     db.audit(u.id, 'google_calendar_connected', out.email);
+    sessions.backfillHost(u.id).catch((e) => console.error('[calendar backfill]', e.message));
   } catch (e) {
     return res.status(400).type('text').send(`Google Calendar couldn't be connected: ${e.message}`);
   }
@@ -84,7 +85,20 @@ r.put('/google', wrap(async (req, res) => {
   const booking = String(req.body?.booking_calendar_id || conn.booking_calendar_id);
   if (!ids.has(booking) || cals.find((c) => c.id === booking)?.canWrite === false) throw bad('Choose a calendar you can add events to.');
   await db.run('update anvaya.calendar_connections set busy_calendar_ids = $2, booking_calendar_id = $3, updated_at = now() where id = $1', [conn.id, busy.length ? busy : ['primary'], booking]);
-  res.json({ ok: true });
+  const queued = await sessions.backfillHost(req.auth.user.id);
+  res.json({ ok: true, synced: queued });
+}));
+/** Your own Google events for your own calendar view. Only the signed-in host's connection is ever read here. */
+r.get('/google/events', wrap(async (req, res) => {
+  const from = v.date(req.query.from, { required: true, label: 'From' }), to = v.date(req.query.to, { required: true, label: 'To' });
+  if (new Date(to) - new Date(from) > 62 * 86400e3) throw bad('Ask for at most two months at a time.');
+  const conn = await gcal.connectionFor(req.auth.user.id);
+  if (!conn || (!conn.id && !gcal.FAKE())) return res.json({ connected: false, calendars: [], events: [] });
+  const calendars = await gcal.listCalendars(conn);
+  const known = new Set(calendars.map((c) => c.id));
+  const want = String(req.query.calendars || '').split(',').filter((x) => known.has(x));
+  const ids = want.length ? want : [...new Set([...conn.busy_calendar_ids, conn.booking_calendar_id])].filter((x) => known.has(x));
+  res.json({ connected: true, calendars, shown: ids, events: await gcal.listEvents(conn, ids, from, to) });
 }));
 r.delete('/google', wrap(async (req, res) => {
   await db.run('delete from anvaya.calendar_connections where user_id = $1', [req.auth.user.id]);
@@ -174,7 +188,7 @@ r.post('/bookings/:id/calendar-retry', wrap(async (req, res) => {
   const b = await ownBooking(req);
   if (b.status !== 'scheduled') throw bad('Only confirmed sessions have calendar events.');
   await db.run("update anvaya.bookings set calendar_status = 'pending', calendar_error = '' where id = $1", [b.id]);
-  const jid = await jobs.enqueue('calendar.sync', { bookingId: b.id, reason: b.google_event_id ? 'reschedule' : 'confirm' }, { dedupeKey: `calretry:${b.id}:${Date.now()}`, maxAttempts: 8 });
+  const jid = await jobs.enqueue('calendar.sync', { bookingId: b.id, reason: b.google_event_id ? 'reschedule' : b.calendar_status === 'none' ? 'backfill' : 'confirm' }, { dedupeKey: `calretry:${b.id}:${Date.now()}`, maxAttempts: 8 });
   const out = await jobs.runNow(jid);
   const after = await db.one('select calendar_status, calendar_error, meet_link from anvaya.bookings where id = $1', [b.id]);
   res.json({ ok: out.ok, ...after });

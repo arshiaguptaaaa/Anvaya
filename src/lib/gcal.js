@@ -14,11 +14,11 @@ const configured = () => FAKE() || !!(process.env.GOOGLE_CLIENT_ID && process.en
 const redirectUri = () => `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/api/calendar/google/callback`;
 
 // ── in-memory fake (tests) ──
-const fake = { events: new Map(), busy: [], fail: false, disconnected: false, seq: 0 };
+const fake = { events: new Map(), busy: [], items: [], fail: false, disconnected: false, seq: 0 };
 
 function authUrl(state) {
   const q = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri: redirectUri(), response_type: 'code', scope: SCOPES.join(' '),
-    access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state });
+    access_type: 'offline', prompt: 'consent select_account', include_granted_scopes: 'true', state });
   return `${AUTH_URL}?${q}`;
 }
 
@@ -73,9 +73,9 @@ async function connectionFor(userId, q = db) {
 }
 
 async function listCalendars(conn) {
-  if (FAKE()) return [{ id: 'primary', summary: 'Primary (test)', primary: true }];
+  if (FAKE()) return [{ id: 'primary', summary: 'Primary (test)', primary: true, canWrite: true, color: '#039be5' }];
   const b = await api(conn, 'GET', '/users/me/calendarList?minAccessRole=reader');
-  return (b.items || []).map((c) => ({ id: c.id, summary: c.summaryOverride || c.summary, primary: !!c.primary, canWrite: ['owner', 'writer'].includes(c.accessRole) }));
+  return (b.items || []).map((c) => ({ id: c.id, summary: c.summaryOverride || c.summary, primary: !!c.primary, canWrite: ['owner', 'writer'].includes(c.accessRole), color: c.backgroundColor || '#039be5' }));
 }
 
 const busyCache = new Map(); // conn.id → { at, from, to, ranges }
@@ -90,6 +90,24 @@ async function busy(conn, from, to) {
   return ranges;
 }
 
+/**
+ * The host's own events for their own calendar view (never shown to students or other staff).
+ * Events Anvaya created are skipped: the app already shows them as sessions.
+ */
+async function listEvents(conn, calendarIds, from, to) {
+  const norm = (e, calendarId) => ({ id: e.id, calendarId, title: e.summary || '(No title)', allDay: !!e.start?.date,
+    start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date, location: e.location || '', link: e.htmlLink || '', busy: e.transparency !== 'transparent' });
+  if (FAKE()) return fake.items.filter((e) => calendarIds.includes(e.calendarId || 'primary')).map((e) => norm(e, e.calendarId || 'primary'));
+  const out = [];
+  for (const id of calendarIds.slice(0, 10)) {
+    const q = new URLSearchParams({ timeMin: new Date(from).toISOString(), timeMax: new Date(to).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250',
+      fields: 'items(id,summary,start,end,location,htmlLink,status,transparency,extendedProperties)' });
+    const b = await api(conn, 'GET', `/calendars/${encodeURIComponent(id)}/events?${q}`);
+    for (const e of b.items || []) if (e.status !== 'cancelled' && !e.extendedProperties?.private?.anvaya_booking) out.push(norm(e, id));
+  }
+  return out;
+}
+
 /** Creates (or updates) the booking's event with a Google Meet link. Returns { eventId, calendarId, meetLink }. */
 async function upsertEvent(conn, { eventId, calendarId, requestId, summary, description, start, end, attendees }) {
   if (FAKE()) {
@@ -102,7 +120,8 @@ async function upsertEvent(conn, { eventId, calendarId, requestId, summary, desc
   }
   const cal = encodeURIComponent(calendarId || conn.booking_calendar_id || 'primary');
   const body = { summary, description, start: { dateTime: new Date(start).toISOString(), timeZone: 'Asia/Kolkata' }, end: { dateTime: new Date(end).toISOString(), timeZone: 'Asia/Kolkata' },
-    attendees: attendees.map((email) => ({ email })), guestsCanModify: false, reminders: { useDefault: true } };
+    attendees: attendees.map((email) => ({ email })), guestsCanModify: false, reminders: { useDefault: true },
+    extendedProperties: { private: { anvaya_booking: String(requestId).split('-')[1] || '1' } } };
   let ev;
   if (eventId) ev = await api(conn, 'PATCH', `/calendars/${cal}/events/${encodeURIComponent(eventId)}?conferenceDataVersion=1&sendUpdates=none`, body);
   else ev = await api(conn, 'POST', `/calendars/${cal}/events?conferenceDataVersion=1&sendUpdates=none`, { ...body, conferenceData: { createRequest: { requestId, conferenceSolutionKey: { type: 'hangoutsMeet' } } } });
@@ -119,4 +138,4 @@ async function cancelEvent(conn, { eventId, calendarId }) {
   });
 }
 
-module.exports = { SCOPES, configured, authUrl, exchangeCode, saveConnection, connectionFor, listCalendars, busy, upsertEvent, cancelEvent, redirectUri, fake, FAKE };
+module.exports = { SCOPES, configured, authUrl, exchangeCode, saveConnection, connectionFor, listCalendars, listEvents, busy, upsertEvent, cancelEvent, redirectUri, fake, FAKE };
