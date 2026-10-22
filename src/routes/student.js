@@ -137,7 +137,7 @@ r.get('/mentors', wrap(async (req, res) => {
   const testViewer = !!(await db.one('select is_test from anvaya.students where id = $1', [me(req)]))?.is_test;
   const mentors = await db.all(`select id, name, expertise, bio, headline, years_experience, target_roles, session_details, session_duration,
       session_price_paise, accepts_paid_sessions, photo_status = 'approved' as has_photo
-    from anvaya.mentors where status = 'active' and (not is_test or $1) order by name`, [testViewer]);
+    from anvaya.mentors where status = 'active' and listed and (not is_test or $1) order by name`, [testViewer]);
   const services = await db.all(`select id, mentor_id, title, description, duration_min, price_paise, intake_questions from anvaya.mentor_services
     where active and approval = 'approved' order by price_paise`);
   const q = (x) => String(x || '').trim().toLowerCase();
@@ -154,6 +154,7 @@ r.get('/mentors', wrap(async (req, res) => {
   res.json(out);
 }));
 r.get('/mentors/:id/slots', wrap(async (req, res) => {
+  if (!await db.one('select 1 from anvaya.mentors where id = $1 and listed', [id(req)])) throw new HttpError(404, 'Mentor not found.');
   const sid = v.id(req.query.service_id, 'Service');
   const svc = sid ? await db.one("select duration_min from anvaya.mentor_services where id = $1 and mentor_id = $2 and active and approval = 'approved'", [sid, id(req)]) : null;
   if (sid && !svc) throw new HttpError(404, 'Service not found.');
@@ -176,6 +177,7 @@ r.post('/bookings/checkup', wrap(async (req, res) => {
 /** Paid session request: the slot is held while the mentor reviews it; payment is due only after approval. */
 r.post('/bookings/paid', wrap(async (req, res) => {
   const sid = me(req);
+  if (!await db.one('select 1 from anvaya.mentors where id = $1 and listed', [v.id(req.body?.mentor_id, 'Mentor') || 0])) throw new HttpError(404, 'Mentor not found.');
   const b = await bookingsLib.create({ studentId: sid, mentorId: v.id(req.body?.mentor_id, 'Mentor', { required: true }),
     startsAt: v.date(req.body?.scheduled_at, { required: true, label: 'Time' }), kind: 'paid_session', userId: req.auth.user.id, asRequest: true,
     serviceId: v.id(req.body?.service_id, 'Service'), intakeAnswers: req.body?.intake_answers && typeof req.body.intake_answers === 'object' ? req.body.intake_answers : {} });

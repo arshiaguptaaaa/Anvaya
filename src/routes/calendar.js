@@ -11,6 +11,7 @@ const sessions = require('../lib/sessions');
 const bookingsLib = require('../lib/bookings');
 const { HttpError, bad, v, id, wrap } = require('../lib/http');
 const jobs = require('../lib/jobs');
+const freechats = require('../lib/freechats');
 
 const r = express.Router();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -169,7 +170,12 @@ r.get('/events', wrap(async (req, res) => {
     order by b.scheduled_at`, [from, to, mid]);
   const live = await db.all(`select l.id, l.title, l.starts_at, l.ends_at, l.status, m.name as mentor_name from anvaya.live_sessions l left join anvaya.mentors m on m.id = l.mentor_id
     where l.starts_at < $2 and l.ends_at > $1 and ($3::bigint is null or l.mentor_id = $3) and l.status <> 'cancelled'`, [from, to, mid]);
-  res.json({ bookings, live });
+  const freechats = await db.all(`select f.id, f.name, f.email, f.phone, f.situation, f.scheduled_at, f.ends_at, f.status, f.hold_expires_at, f.calendar_status, f.calendar_error,
+      f.meet_link, f.lead_id, m.id as mentor_id, m.name as mentor_name
+    from anvaya.freechats f join anvaya.mentors m on m.id = f.mentor_id
+    where f.scheduled_at < $2 and f.ends_at > $1 and ($3::bigint is null or f.mentor_id = $3) and not (f.status = 'cancelled' and f.cancelled_at < now() - interval '30 days')
+    order by f.scheduled_at`, [from, to, mid]);
+  res.json({ bookings, live, freechats });
 }));
 
 // ── Session actions ─────────────────────────────────────────────────────
@@ -192,6 +198,28 @@ r.post('/bookings/:id/calendar-retry', wrap(async (req, res) => {
   const out = await jobs.runNow(jid);
   const after = await db.one('select calendar_status, calendar_error, meet_link from anvaya.bookings where id = $1', [b.id]);
   res.json({ ok: out.ok, ...after });
+}));
+
+// ── Free chats booked from the website ──
+async function ownChat(req) {
+  const f = await db.one('select * from anvaya.freechats where id = $1', [id(req)]);
+  if (!f || (!isStaff(req) && f.mentor_id !== req.auth.mentor.id)) throw new HttpError(404, 'Free chat not found.');
+  return f;
+}
+r.post('/freechats/:id/approve', wrap(async (req, res) => { await ownChat(req); const f = await freechats.approve(id(req), req.auth.user); res.json({ calendar_status: f.calendar_status, meet_link: f.meet_link }); }));
+r.post('/freechats/:id/cancel', wrap(async (req, res) => { await ownChat(req); await freechats.cancel(id(req), req.auth.user, v.str(req.body?.reason, { max: 300 })); res.json({ ok: true }); }));
+r.post('/freechats/:id/outcome', wrap(async (req, res) => {
+  const f = await ownChat(req);
+  if (Date.now() < new Date(f.scheduled_at).getTime()) throw bad('You can record how it went once the chat has started.');
+  await freechats.outcome(f.id, req.auth.user, v.oneOf(req.body?.status, ['completed', 'no_show'], 'Outcome'));
+  res.json({ ok: true });
+}));
+r.post('/freechats/:id/calendar-retry', wrap(async (req, res) => {
+  const f = await ownChat(req);
+  if (f.status !== 'scheduled') throw bad('Only confirmed free chats have calendar events.');
+  await db.run("update anvaya.freechats set calendar_status = 'pending', calendar_error = '' where id = $1", [f.id]);
+  await freechats.sync(f.id);
+  res.json(await db.one('select calendar_status, calendar_error, meet_link from anvaya.freechats where id = $1', [f.id]));
 }));
 
 module.exports = r;

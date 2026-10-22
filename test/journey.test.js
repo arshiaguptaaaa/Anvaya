@@ -1169,6 +1169,60 @@ test('Google sync: a host sees only their own Google events; sessions confirmed 
   assert.ok(!mailer.sent.slice(before).some((m) => /^Confirmed/.test(m.subject)), 'no duplicate confirmation for an already-confirmed session');
 });
 
+test('website free chats: visitors pick the host’s open slots, the slot is held, approval sends a Meet link; never double-booked', async () => {
+  const pub = (u, o = {}) => fetch(BASE + u, { ...o, headers: { 'Content-Type': 'application/json', Origin: 'https://anvayacareers.in', ...(o.headers || {}) } });
+  assert.deepEqual(await (await pub('/api/public/freechat/slots')).json(), { available: false, minutes: 15, slots: [] }, 'no host chosen → plain form');
+  const host = await admin.post('/api/admin/freechat/host-self');
+  assert.equal(host.status, 200, host.text);
+  assert.equal((await ops.post('/api/admin/freechat/host-self')).status, 403, 'only admins choose the host');
+  assert.ok(!(await stu1.get('/api/student/mentors')).json.some((m) => m.id === host.json.mentor_id), 'the free-chat host is hidden from students');
+  assert.equal((await stu1.get(`/api/student/mentors/${host.json.mentor_id}/slots`)).status, 404);
+  const pre = await fetch(`${BASE}/api/public/freechat/slots`, { method: 'OPTIONS', headers: { Origin: 'https://anvayacareers.in', 'Access-Control-Request-Method': 'GET' } });
+  assert.equal(pre.status, 204);
+  const open = await (await pub('/api/public/freechat/slots')).json();
+  assert.equal(open.available, true); assert.equal(open.minutes, 15); assert.ok(open.slots.length > 5);
+  assert.ok(open.slots.every((x) => typeof x === 'string'), 'times only');
+  const slot = open.slots[3];
+  const ask = (name, phone, extra) => pub('/api/public/leads', { method: 'POST', body: JSON.stringify({ name, phone, situation: 'Applying but not hearing back', slot, ...extra }) });
+  assert.equal((await ask('Riya Guest', '+91 98111 22233', {})).status, 400, 'an email is needed with a time');
+  const [a, b] = await Promise.all([ask('Riya Guest', '+91 98111 22233', { email: 'riya@guest.test' }), ask('Kabir Guest', '+91 98111 44455', { email: 'kabir@guest.test' })]);
+  assert.deepEqual([a.status, b.status].sort(), [201, 409], 'one slot, one visitor');
+  const winner = a.status === 201 ? { name: 'Riya Guest', email: 'riya@guest.test' } : { name: 'Kabir Guest', email: 'kabir@guest.test' };
+  assert.ok(!(await (await pub('/api/public/freechat/slots')).json()).slots.includes(slot), 'held slot disappears from the website');
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  const req = lastEmailTo(winner.email);
+  assert.match(req.subject, /^Request received: free chat/); assert.match(req.text, /not confirmed yet/i);
+  assert.match(lastEmailTo('admin@anvaya.test').subject, /^New session request/);
+  const lead = await db.one('select l.*, f.id as fid from anvaya.leads l join anvaya.freechats f on f.lead_id = l.id where l.email = $1', [winner.email]);
+  assert.equal(lead.source, 'Free 15-min chat (website)');
+  // the host sees it on their calendar and approves → Google event + Meet link + confirmations
+  const evs = (await admin.get(`/api/calendar/events?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 20 * 86400e3).toISOString())}`)).json;
+  assert.ok(evs.freechats.some((f) => f.id === lead.fid && f.status === 'requested'));
+  assert.equal((await mentorA.post(`/api/calendar/freechats/${lead.fid}/approve`)).status, 404, 'other mentors can’t act on it');
+  const ok = await admin.post(`/api/calendar/freechats/${lead.fid}/approve`);
+  assert.equal(ok.json.calendar_status, 'synced', ok.text); assert.match(ok.json.meet_link, /meet\.google\.com/);
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  const conf = lastEmailTo(winner.email);
+  assert.match(conf.subject, /^Confirmed: your free chat/); assert.match(conf.text, /meet\.google\.com/);
+  assert.ok(conf.attachments?.some((x) => /\.ics$/.test(x.filename)), 'calendar invite attached');
+  // a student session can't take the same time with this host
+  const clash = await admin.post('/api/admin/bookings', { student_id: ids.s1, mentor_id: host.json.mentor_id, kind: 'checkup', scheduled_at: slot });
+  assert.notEqual(clash.status, 201, 'no double booking across free chats and sessions');
+  // cancel → visitor told, event cancelled
+  await admin.post(`/api/calendar/freechats/${lead.fid}/cancel`, { reason: 'Host unwell' });
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  assert.match(lastEmailTo(winner.email).subject, /^Cancelled: your free chat/);
+  // an unanswered request expires and the visitor is pointed back to the website
+  const later = (await (await pub('/api/public/freechat/slots')).json()).slots[6];
+  assert.equal((await pub('/api/public/leads', { method: 'POST', body: JSON.stringify({ name: 'Tara Guest', phone: '+91 98111 66677', email: 'tara@guest.test', slot: later }) })).status, 201);
+  await db.run("update anvaya.freechats set hold_expires_at = now() - interval '1 minute' where email = 'tara@guest.test'");
+  await jobs.runNow(await jobs.enqueue('bookings.expire_holds', {}));
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  assert.match(lastEmailTo('tara@guest.test').text, /couldn't confirm your free chat/);
+  assert.ok((await (await pub('/api/public/freechat/slots')).json()).slots.includes(later), 'expired hold released');
+  await db.run("update anvaya.settings set value = 'null' where key = 'freechat_mentor_id'");
+});
+
 test('availability: weekly hours, blocked dates and Google busy times shape the bookable slots; students never see private details', async () => {
   const avail = (await mentorA.get('/api/calendar/availability')).json;
   assert.ok(avail.weekly.length >= 7);

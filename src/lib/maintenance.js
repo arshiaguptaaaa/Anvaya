@@ -55,6 +55,17 @@ jobs.register('sessions.reminders', async () => {
         if (r) { n++; await db.run('insert into anvaya.email_log (job_id, to_email, template, booking_id) values ($1,$2,$3,$4) on conflict (job_id) do nothing', [r, to, 'session_reminder', b.id]); }
       }
     }
+    const chats = await db.all(`select f.id, f.scheduled_at, f.email, f.meet_link, mu.email as mentor_email from anvaya.freechats f join anvaya.mentors m on m.id = f.mentor_id
+      left join anvaya.users mu on mu.id = m.user_id where f.status = 'scheduled' and f.meet_link is not null
+      and f.scheduled_at > now() + make_interval(hours => $2) and f.scheduled_at <= now() + make_interval(hours => $1)`, [hours, fromHours]);
+    for (const f of chats) {
+      for (const [to, who] of [[f.email, 'guest'], [f.mentor_email, 'host']]) {
+        if (!to) continue;
+        const r = await jobs.enqueue('email.send', { to, template: 'session_reminder', data: { title: 'Free 15-min chat with Anvaya', startsAt: f.scheduled_at, meetLink: f.meet_link,
+          dashboardUrl: who === 'host' ? `${BASE_URL()}/admin#calendar` : undefined } }, { dedupeKey: `remind:${tag}:freechat:${f.id}:${new Date(f.scheduled_at).getTime()}:${who}` });
+        if (r) { n++; await db.run('insert into anvaya.email_log (job_id, to_email, template) values ($1,$2,$3) on conflict (job_id) do nothing', [r, to, 'session_reminder']); }
+      }
+    }
     const lives = await db.all(`select * from anvaya.live_sessions where status = 'scheduled' and starts_at > now() + make_interval(hours => $2) and starts_at <= now() + make_interval(hours => $1)`, [hours, fromHours]);
     for (const l of lives) {
       for (const p of (await roster(l)).filter((x) => x.email)) {

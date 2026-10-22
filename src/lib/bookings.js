@@ -32,7 +32,9 @@ async function slots(mentorId, { days, q = db, durationMin = null, excludeBookin
   const now = Date.now();
   const busy = await q.all(`select scheduled_at as s, ends_at as e from anvaya.bookings where mentor_id = $1 and status in ${LIVE}
       and (status = 'scheduled' or hold_expires_at is null or hold_expires_at > now()) and ends_at > now() and id <> coalesce($2::bigint, -1)
-    union all select starts_at, ends_at from anvaya.live_sessions where mentor_id = $1 and status = 'scheduled' and ends_at > now()`, [mentorId, excludeBookingId]);
+    union all select starts_at, ends_at from anvaya.live_sessions where mentor_id = $1 and status = 'scheduled' and ends_at > now()
+    union all select scheduled_at, ends_at from anvaya.freechats where mentor_id = $1 and ends_at > now()
+      and (status = 'scheduled' or (status = 'requested' and hold_expires_at > now()))`, [mentorId, excludeBookingId]);
   // The mentor's buffer keeps a gap before and after every existing session.
   const buf = (m.buffer_minutes || 0) * 60e3;
   const busyR = busy.map((b) => [new Date(b.s).getTime() - buf, new Date(b.e).getTime() + buf]);
@@ -85,7 +87,7 @@ async function create({ studentId, mentorId, startsAt, kind, service, serviceId 
       await t.one('select id from anvaya.students where id = $1 for update', [studentId]); // serialize this student's entitlement checks
       await sessions.assertCanBook(studentId, t); // a confirmed no-show blocks every new booking or request
       await releaseExpiredHolds(t, mentorId);
-      const m = await t.one('select * from anvaya.mentors where id = $1', [mentorId]);
+      const m = await t.one('select * from anvaya.mentors where id = $1 for update', [mentorId]); // serialises with free chats for this host
       if (!m || m.status !== 'active') throw new HttpError(400, 'This mentor is not available for booking.');
       let svc = null;
       if (serviceId) {

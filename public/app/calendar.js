@@ -24,18 +24,18 @@
     if (b.status === 'no_show') return ['No-show', 'fail'];
     return ['Cancelled', 'off'];
   }
-  const LAYERS = [['sessions', 'Anvaya sessions', '#c9a84c'], ['classes', 'Classes & mentor rooms', '#8e24aa'], ['blocked', 'Blocked time', '#d9534f'], ['open', 'Open hours', '#33b679']];
+  const LAYERS = [['sessions', 'Anvaya sessions', '#c9a84c'], ['freechats', 'Free chats (website)', '#12a4a0'], ['classes', 'Classes & mentor rooms', '#8e24aa'], ['blocked', 'Blocked time', '#d9534f'], ['open', 'Open hours', '#33b679']];
 
   A.planner = async function (main, { staff = false, isAdmin = false, settings = {} } = {}) {
     const mentors = await api('/api/calendar/mentors');
     const st = {
       view: store.get('view', 'week'), anchor: todayKey(), mini: todayKey(),
       mentorId: staff ? String(store.get('mentor', '') || '') : String(mentors[0]?.id || ''),
-      layers: store.get('layers', { sessions: true, classes: true, blocked: true, open: true, cancelled: false }),
+      layers: { freechats: true, ...store.get('layers', { sessions: true, classes: true, blocked: true, open: true, cancelled: false }) },
       gcals: store.get('gcals', null), // null = the calendars chosen in Google settings
     };
     if (staff && st.mentorId && !mentors.some((m) => String(m.id) === st.mentorId)) st.mentorId = '';
-    let avail = null, data = { bookings: [], live: [] }, g = { connected: false, calendars: [], events: [], shown: [] }, gInfo = null;
+    let avail = null, data = { bookings: [], live: [], freechats: [] }, g = { connected: false, calendars: [], events: [], shown: [] }, gInfo = null;
     const grace = (settings.noshow_grace_minutes ?? 15) * 60e3;
 
     main.innerHTML = `<div class="gc reveal">
@@ -104,6 +104,12 @@
         const t = new Date(b.scheduled_at).getTime(); if (t < s || t >= e) continue;
         const [txt, cls] = stateOf(b);
         out.push({ kind: 'b', id: b.id, title: `${b.student_name}${staff && !st.mentorId && b.mentor_name ? ` × ${b.mentor_name.split(' ')[0]}` : ''}`, sub: b.service || label(b.kind), state: txt, cls, start: b.scheduled_at, end: b.ends_at, color: '#c9a84c' });
+      }
+      if (st.layers.freechats) for (const f of data.freechats || []) {
+        if (f.status === 'cancelled' && !st.layers.cancelled) continue;
+        const t = new Date(f.scheduled_at).getTime(); if (t < s || t >= e) continue;
+        const cls = f.status === 'requested' ? 'tent' : f.status === 'cancelled' ? 'off' : f.status === 'scheduled' ? (f.calendar_status === 'failed' ? 'fail' : 'ok') : f.status === 'no_show' ? 'fail' : 'done';
+        out.push({ kind: 'f', id: f.id, title: `Free chat · ${f.name}`, sub: f.status === 'requested' ? 'Awaiting approval' : f.phone, cls, start: f.scheduled_at, end: f.ends_at, color: '#12a4a0' });
       }
       if (st.layers.classes) for (const l of data.live) { const t = new Date(l.starts_at).getTime(); if (t >= s && t < e) out.push({ kind: 'l', id: l.id, title: l.title, sub: l.mentor_name || 'Class', cls: 'ok', start: l.starts_at, end: l.ends_at, color: '#8e24aa' }); }
       const w = windowsOn(key);
@@ -190,7 +196,12 @@
     function queue() {
       const now = Date.now();
       const need = data.bookings.filter((b) => (b.status === 'requested' && !b.proposed) || (b.status === 'scheduled' && b.calendar_status === 'failed') || (b.status === 'scheduled' && new Date(b.scheduled_at).getTime() + grace < now) || b.needs_review);
-      $('#gcQueue').innerHTML = need.length ? `<div class="gc-sec"><div class="gc-sec-h">Needs action <span class="gc-badge">${need.length}</span></div>${need.slice(0, 6).map((b) => {
+      const chats = (data.freechats || []).filter((f) => f.status === 'requested' || (f.status === 'scheduled' && f.calendar_status === 'failed') || (f.status === 'scheduled' && new Date(f.ends_at).getTime() < now));
+      const total = need.length + chats.length;
+      $('#gcQueue').innerHTML = total ? `<div class="gc-sec"><div class="gc-sec-h">Needs action <span class="gc-badge">${total}</span></div>${chats.slice(0, 6).map((f) => {
+        const why = f.status === 'requested' ? 'Free chat · approve or decline' : f.calendar_status === 'failed' ? 'Free chat · Meet failed' : 'Free chat · how did it go?';
+        return `<button class="gc-task" data-k="f" data-id="${f.id}"><strong>${esc(f.name)}</strong><span>${esc(dt(f.scheduled_at))} · ${esc(why)}</span></button>`;
+      }).join('')}${need.slice(0, 6).map((b) => {
         const why = b.status === 'requested' ? 'Approve or decline' : b.calendar_status === 'failed' ? 'Meet link failed · retry' : b.needs_review ? 'Review' : 'Record the outcome';
         return `<button class="gc-task" data-k="b" data-id="${b.id}"><strong>${esc(b.student_name)}</strong><span>${esc(dt(b.scheduled_at))} · ${esc(why)}</span></button>`;
       }).join('')}</div>` : '';
@@ -321,6 +332,7 @@
     // ── Event details ──
     function itemPopover(kind, idv) {
       if (kind === 'b') return bookingModal(Number(idv));
+      if (kind === 'f') return chatModal(Number(idv));
       if (kind === 'l') { const l = data.live.find((x) => x.id === Number(idv)); return modal(`<div class="eyebrow">Class / mentor room</div><h2 class="h2 mb-1">${esc(l.title)}</h2><p class="small muted mb-2">${esc(dt(l.starts_at))} – ${esc(time(l.ends_at))} IST${l.mentor_name ? ` · ${esc(l.mentor_name)}` : ''}</p>${staff ? '<a class="btn btn-ghost btn-sm" href="#calendar-list">Manage in list view</a>' : ''}`); }
       if (kind === 'g') {
         const ev = g.events.find((x) => x.id === idv), cal = g.calendars.find((c) => c.id === ev.calendarId);
@@ -384,6 +396,35 @@
           toast('Completed');
         });
         if (!afterGrace) { const p = document.createElement('p'); p.className = 'small muted ta-l'; p.textContent = `A no-show can be recorded from ${time(new Date(start + grace).toISOString())}.`; acts.prepend(p); }
+      }
+    }
+    function chatModal(cid) {
+      const f = data.freechats.find((x) => x.id === cid); if (!f) return;
+      const now = Date.now(), started = now >= new Date(f.scheduled_at).getTime();
+      const state = { requested: 'Requested · awaiting approval', scheduled: 'Confirmed', completed: 'Completed', no_show: 'Didn’t join', cancelled: 'Cancelled' }[f.status];
+      const ui = modal(`<div class="eyebrow">Free 15-min chat · from the website</div><div class="row-between mb-2"><h2 class="h2">${esc(f.name)}</h2><span class="pill">${esc(state)}</span></div>
+        <div class="kv-inline mb-2"><span>When <strong>${esc(dt(f.scheduled_at))} IST</strong></span><span>Until <strong>${esc(time(f.ends_at))}</strong></span></div>
+        <dl class="kv mb-2"><dt>Phone</dt><dd><a href="tel:${esc(f.phone)}">${esc(f.phone)}</a> · <a href="https://wa.me/${esc(String(f.phone).replace(/\D/g, ''))}" target="_blank" rel="noopener noreferrer">WhatsApp</a></dd>
+          <dt>Email</dt><dd>${esc(f.email)}</dd><dt>Situation</dt><dd>${esc(f.situation || '—')}</dd></dl>
+        ${f.status === 'requested' && f.hold_expires_at ? `<p class="small muted mb-2">Slot held until ${esc(dt(f.hold_expires_at))}; released automatically if nobody responds.</p>` : ''}
+        ${f.status === 'scheduled' ? `<p class="small mb-2">Google Calendar: ${f.calendar_status === 'synced' ? `<span class="pill ok">Added</span> <a href="${esc(f.meet_link)}" target="_blank" rel="noopener noreferrer">Join Meet</a>` : f.calendar_status === 'failed' ? `<span class="pill bad">Failed</span> <span class="due">${esc(f.calendar_error)}</span> — no confirmation sent yet.` : '<span class="pill">Adding…</span>'}</p>` : ''}
+        ${f.lead_id && staff ? '<p class="small"><a href="#leads">Open in Leads →</a></p>' : ''}
+        <div class="form-error" hidden></div><div class="modal-actions" id="fcActs"><button type="button" class="btn btn-ghost" data-close>Close</button></div>`, { wide: true });
+      const acts = ui.el.querySelector('#fcActs'), err = ui.el.querySelector('.form-error');
+      const add = (text, cls, fn) => { const x = document.createElement('button'); x.type = 'button'; x.className = `btn ${cls}`; x.textContent = text; x.addEventListener('click', async () => {
+        err.hidden = true; x.disabled = true;
+        try { const done = await fn(); if (done !== false) { ui.close(); load(); } } catch (e) { err.textContent = e.message; err.hidden = false; } finally { if (x.isConnected) x.disabled = false; }
+      }); acts.appendChild(x); };
+      const post = (path, body) => api(`/api/calendar/freechats/${f.id}/${path}`, { method: 'POST', body });
+      if (f.status === 'requested') {
+        add('Decline', 'btn-danger', async () => { const r = await reasonPrompt('Decline this free chat?', 'They’re emailed that the time doesn’t work, with a link to pick another. The slot is released.', 'Message to them (optional)', false); if (r === null) return false; await post('cancel', { reason: r }); toast('Declined'); });
+        add('Approve', 'btn-primary', async () => { const r = await post('approve'); toast(r.calendar_status === 'synced' ? 'Confirmed — Meet link sent' : 'Approved, but the Meet link failed. Retry from the chat.', r.calendar_status !== 'synced'); });
+      }
+      if (f.status === 'scheduled' && f.calendar_status === 'failed') add('Retry calendar + Meet', 'btn-primary', async () => { const r = await post('calendar-retry'); toast(r.calendar_status === 'synced' ? 'Meet link created; confirmation sent' : `Still failing: ${r.calendar_error}`, r.calendar_status !== 'synced'); });
+      if (f.status === 'scheduled' && !started) add('Cancel', 'btn-danger', async () => { const r = await reasonPrompt('Cancel this free chat?', 'They’re emailed and the Google Calendar event is removed.', 'Reason (shared with them)', false); if (r === null) return false; await post('cancel', { reason: r }); toast('Cancelled'); });
+      if (f.status === 'scheduled' && started) {
+        add('Didn’t join', 'btn-ghost', async () => { await post('outcome', { status: 'no_show' }); toast('Recorded'); });
+        add('Completed', 'btn-primary', async () => { await post('outcome', { status: 'completed' }); toast('Completed'); });
       }
     }
     function reasonPrompt(title, text, fieldLabel, required) {

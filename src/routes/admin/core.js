@@ -63,6 +63,11 @@ r.put('/settings', adminOnly, wrap(async (req, res) => {
   const body = req.body || {};
   for (const [k, val] of Object.entries(body)) {
     if (!(k in settings.DEFAULTS)) throw bad(`Unknown setting ${k}.`);
+    if (k === 'freechat_mentor_id') {
+      const mid = val === '' || val == null ? null : Number(val);
+      if (mid !== null && !await db.one("select 1 from anvaya.mentors where id = $1 and status = 'active'", [mid])) throw bad('Choose an active host profile.');
+      await settings.set(k, mid, req.auth.user.id); continue;
+    }
     if (k === 'calendar_host_user_id') {
       const uid = val === '' || val == null ? null : Number(val);
       if (uid !== null && !await db.one("select 1 from anvaya.users where id = $1 and role in ('admin','ops') and disabled_at is null", [uid])) throw bad('Choose an active admin or ops user.');
@@ -81,6 +86,20 @@ r.put('/settings', adminOnly, wrap(async (req, res) => {
 r.get('/team', adminOnly, wrap(async (_req, res) => {
   res.json(await db.all(`select id, email, name, role, (password_hash is not null) as has_password, disabled_at, last_login_at, created_at
     from anvaya.users where role in ('admin','ops') order by role, email`));
+}));
+r.get('/freechat/hosts', adminOnly, wrap(async (_req, res) => res.json(await db.all("select id, name, listed from anvaya.mentors where status = 'active' order by listed, name"))));
+/** Free chats hosted from your own calendar: an unlisted host profile (hours, blocks, Google) that students never see. */
+r.post('/freechat/host-self', adminOnly, wrap(async (req, res) => {
+  const u = req.auth.user;
+  let m = await db.one('select id from anvaya.mentors where user_id = $1', [u.id]);
+  if (!m) {
+    m = await db.one(`insert into anvaya.mentors (user_id, name, status, profile_completed, session_duration, listed, expertise)
+      values ($1,$2,'active',true,15,false,'Free chats') returning id`, [u.id, u.name || 'Anvaya team']);
+    for (const wd of [1, 2, 3, 4, 5]) await db.run("insert into anvaya.availability (mentor_id, weekday, start_time, end_time) values ($1,$2,'18:00','20:00')", [m.id, wd]);
+  }
+  await settings.set('freechat_mentor_id', m.id, u.id);
+  db.audit(u.id, 'freechat_host_set', `mentor:${m.id}`);
+  res.json({ mentor_id: m.id });
 }));
 r.post('/team', adminOnly, wrap(async (req, res) => {
   const email = v.email(req.body?.email);

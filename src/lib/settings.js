@@ -11,6 +11,8 @@ const DEFAULTS = {
   reschedule_cutoff_hours: 2,       // students can reschedule/cancel online until this many hours before start
   noshow_grace_minutes: 15,         // the host can confirm a no-show only this long after the start
   calendar_host_user_id: null,      // fallback Google account that hosts events when the mentor isn't connected
+  freechat_mentor_id: null,         // host profile whose open slots the website's free-chat form offers (null = no slot picker)
+  freechat_minutes: 15,             // length of a free chat
 };
 
 async function all(q = db) {

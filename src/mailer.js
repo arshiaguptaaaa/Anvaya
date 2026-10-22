@@ -186,11 +186,44 @@ const templates = {
       bodyHtml: `<p style="margin:0 0 12px;">${d.forHost ? `${strong(esc(d.studentName))} · ` : ''}${strong(esc(d.title))} with ${esc(d.mentorName)}</p>${sessionRows(d)}
         <p style="margin:16px 0 0;"><a href="${esc(d.meetLink)}" style="display:inline-block;background:#c9a84c;color:#08111f;font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:700;padding:14px 26px;border-radius:4px;text-decoration:none;">Join Google Meet</a></p>
         <p style="margin:10px 0 0;font-size:13px;color:#d9cdb8;">${esc(d.meetLink)}</p>
-        <p style="margin:16px 0 0;font-size:13px;"><a style="color:#c9a84c;" href="${esc(d.gcalUrl)}">Add to Google Calendar</a> &nbsp;·&nbsp; <a style="color:#c9a84c;" href="${esc(d.icsUrl)}">Download calendar invite (.ics)</a></p>
+        <p style="margin:16px 0 0;font-size:13px;"><a style="color:#c9a84c;" href="${esc(d.gcalUrl)}">Add to Google Calendar</a>${d.icsUrl ? ` &nbsp;·&nbsp; <a style="color:#c9a84c;" href="${esc(d.icsUrl)}">Download calendar invite (.ics)</a>` : ''}</p>
         ${d.forHost ? '' : `<p style="margin:10px 0 0;font-size:13px;"><a style="color:#c9a84c;" href="${esc(d.rescheduleUrl)}">Reschedule</a> &nbsp;·&nbsp; <a style="color:#c9a84c;" href="${esc(d.cancelUrl)}">Cancel</a></p>`}`,
       footnote: POLICY_HTML,
     }),
-    text: `Confirmed: ${d.title} with ${d.mentorName}\n${ist(d.startsAt)} (Asia/Kolkata), ${d.duration} min\nJoin Google Meet: ${d.meetLink}\nAdd to Google Calendar: ${d.gcalUrl}\nCalendar invite (.ics): ${d.icsUrl}\n${d.forHost ? '' : `Reschedule: ${d.rescheduleUrl}\nCancel: ${d.cancelUrl}\n`}\n${POLICY_TEXT}\n`,
+    text: `Confirmed: ${d.title} with ${d.mentorName}\n${ist(d.startsAt)} (Asia/Kolkata), ${d.duration} min\nJoin Google Meet: ${d.meetLink}\nAdd to Google Calendar: ${d.gcalUrl}\n${d.icsUrl ? `Calendar invite (.ics): ${d.icsUrl}\n` : ''}${d.forHost ? '' : `Reschedule: ${d.rescheduleUrl}\nCancel: ${d.cancelUrl}\n`}\n${POLICY_TEXT}\n`,
+  }),
+  // ── Free chats booked from the website (the visitor has no account, so no dashboard links) ──
+  freechat_requested: (d) => ({
+    subject: `Request received: free chat on ${ist(d.startsAt)}`,
+    html: layout({
+      heading: `Request ${em('received')}`,
+      bodyHtml: `<p style="margin:0 0 12px;">Hi ${esc(d.name)}, thanks for picking a time for your ${strong('free 15-minute chat')} with Anvaya.</p>${sessionRows(d)}
+        <p style="margin:12px 0 0;">${strong('This is not confirmed yet.')} We're holding the slot for you and will confirm it shortly. Your confirmation email will include the Google Meet link and a calendar invite.</p>`,
+      footnote: 'Need a different time? Just reply to this email or message us on WhatsApp.',
+    }),
+    text: `Hi ${d.name}, we've received your free chat request for ${ist(d.startsAt)} (${d.duration} min). This is not confirmed yet; we'll email you the Google Meet link once it is.\n`,
+  }),
+  freechat_confirmed: (d) => ({
+    subject: `Confirmed: your free chat · ${ist(d.startsAt)}`,
+    html: layout({
+      heading: `Your free chat is ${em('confirmed')}`,
+      bodyHtml: `<p style="margin:0 0 12px;">Hi ${esc(d.name)}, see you soon.</p>${sessionRows(d)}
+        <p style="margin:16px 0 0;"><a href="${esc(d.meetLink)}" style="display:inline-block;background:#c9a84c;color:#08111f;font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:700;padding:14px 26px;border-radius:4px;text-decoration:none;">Join Google Meet</a></p>
+        <p style="margin:10px 0 0;font-size:13px;color:#d9cdb8;">${esc(d.meetLink)}</p>
+        <p style="margin:16px 0 0;font-size:13px;"><a style="color:#c9a84c;" href="${esc(d.gcalUrl)}">Add to Google Calendar</a> · the calendar invite is attached.</p>`,
+      footnote: 'Need to change or cancel? Reply to this email or message us on WhatsApp.',
+    }),
+    text: `Confirmed: your free chat with Anvaya\n${ist(d.startsAt)} (Asia/Kolkata), ${d.duration} min\nJoin Google Meet: ${d.meetLink}\nAdd to Google Calendar: ${d.gcalUrl}\nNeed to change it? Reply to this email.\n`,
+  }),
+  freechat_declined: (d) => ({
+    subject: d.expired ? 'About your free chat request' : d.cancelled ? `Cancelled: your free chat on ${ist(d.startsAt, { dateStyle: 'medium' })}` : `That time isn't available: free chat on ${ist(d.startsAt, { dateStyle: 'medium' })}`,
+    html: layout({
+      heading: d.cancelled ? `Free chat ${em('cancelled')}` : `Let's find ${em('another time')}`,
+      bodyHtml: `<p style="margin:0 0 12px;">Hi ${esc(d.name)}, ${d.expired ? `we couldn't confirm your free chat for ${esc(ist(d.startsAt))} in time, so the slot was released.` : d.cancelled ? `your free chat on ${esc(ist(d.startsAt))} has been cancelled.` : `we can't make ${esc(ist(d.startsAt))} work.`}${d.reason ? ` ${esc(d.reason)}` : ''}</p>
+        <p style="margin:0;">Pick another time on our website, or just reply to this email and we'll set it up with you.</p>`,
+      ctaUrl: d.chatUrl, ctaLabel: 'Pick another time',
+    }),
+    text: `Hi ${d.name}, ${d.expired ? `we couldn't confirm your free chat for ${ist(d.startsAt)} in time.` : d.cancelled ? `your free chat on ${ist(d.startsAt)} has been cancelled.` : `we can't make ${ist(d.startsAt)} work.`} ${d.reason || ''} Pick another time: ${d.chatUrl}\n`,
   }),
   request_expired: (d) => ({
     subject: `Request expired: ${d.title}`,

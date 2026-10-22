@@ -250,7 +250,7 @@ async function expireHolds() {
   }
   return rows.length;
 }
-jobs.register('bookings.expire_holds', async () => ({ expired: await expireHolds() }));
+jobs.register('bookings.expire_holds', async () => ({ expired: await expireHolds(), freechats: await require('./freechats').expireHolds() }));
 
 // ── Outcomes: attended / student no-show / host absent / technical issue ──
 async function markOutcome(bookingId, user, { outcome, reason = '' }) {

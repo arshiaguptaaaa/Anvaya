@@ -7,6 +7,7 @@ const sec = require('../security');
 const jobs = require('../lib/jobs');
 const { HttpError, bad, v, wrap } = require('../lib/http');
 
+const freechats = require('../lib/freechats');
 const r = express.Router();
 const SHEET_URL = () => process.env.GOOGLE_SHEET_WEBHOOK_URL || '';
 const BASE_URL = () => (process.env.APP_BASE_URL || '').replace(/\/$/, '');
@@ -31,13 +32,17 @@ jobs.register('leads.sheet_sync', async ({ leadId }) => {
 const allowedOrigins = () => [BASE_URL(), ...(process.env.EXTRA_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean)];
 // The brochure may live on another origin (split setup: anvayacareers.in → app.anvayacareers.in), so this one
 // endpoint answers CORS for the configured origins only. No cookies are involved (credentials: 'omit').
-r.use(['/public/leads', '/public/checkout', '/public/checkout/verify'], (req, res, next) => {
+r.use(['/public/leads', '/public/checkout', '/public/checkout/verify', '/public/freechat/slots'], (req, res, next) => {
   const origin = req.get('origin');
   if (origin && allowedOrigins().includes(origin)) res.set({ 'Access-Control-Allow-Origin': origin, Vary: 'Origin' });
   if (req.method !== 'OPTIONS') return next();
   if (!origin || !allowedOrigins().includes(origin)) return res.status(403).end();
-  res.set({ 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' }).status(204).end();
+  res.set({ 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' }).status(204).end();
 });
+
+/** Open free-chat slots for the website form (times only, never the host's calendar details). */
+const slotLimiter = sec.rateLimiter({ name: 'freechat-slots', windowMs: 10 * 60e3, max: 60, key: (req) => req.ip });
+r.get('/public/freechat/slots', slotLimiter, wrap(async (_req, res) => { res.set('Cache-Control', 'no-store'); res.json(await freechats.openSlots()); }));
 
 const leadLimiter = sec.rateLimiter({ name: 'lead', windowMs: 60 * 60e3, max: 10, key: (req) => req.ip });
 r.post('/public/leads', leadLimiter, wrap(async (req, res) => {
@@ -50,17 +55,24 @@ r.post('/public/leads', leadLimiter, wrap(async (req, res) => {
   const phone = v.str(b.phone, { max: 40, required: true, label: 'Phone' });
   if (!/^[+\d][\d\s()-]{6,}$/.test(phone)) throw bad('Please enter a valid phone number.');
   const situation = v.str(b.situation, { max: 200, label: 'Situation' });
+  // Optional: a free-chat time picked from the host's open slots (an email is then needed for the Meet invite).
+  const slot = b.slot ? v.date(b.slot, { label: 'Time' }) : null;
+  const email = slot ? v.email(b.email) : (b.email ? v.email(b.email) : '');
   const dup = await db.one("select id from anvaya.leads where phone = $1 and name = $2 and created_at > now() - interval '10 minutes'", [phone, name]);
-  if (dup) return res.status(201).json({ ok: true, id: dup.id });
-  const lead = await db.tx(async (t) => {
-    const l = await t.one(`insert into anvaya.leads (name, phone, situation, source, sheet_sync_status, follow_up_at, next_action)
-      values ($1,$2,$3,'Free 15-min chat (website)',$4, now() + interval '4 hours', 'Call / WhatsApp to set up the free chat') returning id`,
-    [name, phone, situation, SHEET_URL() ? 'pending' : 'not_required']);
-    await t.run("insert into anvaya.lead_activities (lead_id, kind, body) values ($1,'system','Enquiry received from the website free-chat form')", [l.id]);
-    if (SHEET_URL()) await jobs.enqueue('leads.sheet_sync', { leadId: l.id }, { q: t, dedupeKey: `sheet:${l.id}`, maxAttempts: 8 });
-    return l;
+  if (dup && !slot) return res.status(201).json({ ok: true, id: dup.id });
+  const { lead, chat } = await db.tx(async (t) => {
+    const l = dup || await t.one(`insert into anvaya.leads (name, phone, email, situation, source, sheet_sync_status, follow_up_at, next_action)
+      values ($1,$2,$3,$4,'Free 15-min chat (website)',$5, now() + interval '4 hours', 'Call / WhatsApp to set up the free chat') returning id`,
+    [name, phone, email, situation, SHEET_URL() ? 'pending' : 'not_required']);
+    if (!dup) {
+      await t.run("insert into anvaya.lead_activities (lead_id, kind, body) values ($1,'system','Enquiry received from the website free-chat form')", [l.id]);
+      if (SHEET_URL()) await jobs.enqueue('leads.sheet_sync', { leadId: l.id }, { q: t, dedupeKey: `sheet:${l.id}`, maxAttempts: 8 });
+    } else if (email) await t.run("update anvaya.leads set email = $2 where id = $1 and email = ''", [l.id, email]);
+    const c = slot ? await freechats.request({ leadId: l.id, name, email, phone, situation, startsAt: slot }, t) : null;
+    return { lead: l, chat: c };
   });
-  res.status(201).json({ ok: true, id: lead.id });
+  if (chat) await freechats.notifyRequested(chat.id);
+  res.status(201).json({ ok: true, id: lead.id, ...(chat ? { freechat: { status: 'requested', scheduled_at: chat.scheduled_at } } : {}) });
   jobs.kick();
 }));
 

@@ -659,7 +659,7 @@
     });
   }
   async function settingsPage() {
-    const [s, team] = await Promise.all([api('/api/admin/settings'), api('/api/admin/team')]);
+    const [s, team, mentors] = await Promise.all([api('/api/admin/settings'), api('/api/admin/team'), api('/api/admin/freechat/hosts')]);
     main.innerHTML = pageHead('Admin', 'Settings', 'Configurable defaults. Nothing here is hard-coded elsewhere.') + `<div class="card card-pad reveal"><form novalidate><div class="form-error" hidden></div><div class="form-grid">
       ${A.fieldHtml({ name: 'group_capacity_default', label: 'Default group capacity', type: 'number', min: 1 }, s.group_capacity_default)}
       ${A.fieldHtml({ name: 'subscription_grace_days', label: 'Grace period after paid-through (days)', type: 'number', min: 0 }, s.subscription_grace_days)}
@@ -671,9 +671,14 @@
       ${A.fieldHtml({ name: 'booking_payment_hours', label: 'Time to pay after approval (hours)', type: 'number', min: 1 }, s.booking_payment_hours)}
       ${A.fieldHtml({ name: 'reschedule_cutoff_hours', label: 'Self-service reschedule/cancel until (hours before start)', type: 'number', min: 0 }, s.reschedule_cutoff_hours)}
       ${A.fieldHtml({ name: 'noshow_grace_minutes', label: 'No-show can be confirmed after (minutes past start)', type: 'number', min: 0 }, s.noshow_grace_minutes)}
+      ${A.fieldHtml({ name: 'freechat_mentor_id', label: 'Website free chats: whose open slots to offer', type: 'select', options: [['', 'Nobody — visitors just leave their number'], ...mentors.map((m) => [m.id, m.listed === false ? `${m.name} (free-chat host, hidden from students)` : m.name])], hint: 'Visitors pick one of these open 15-minute slots on anvayacareers.in. Set the hours on the Calendar page for that host.' }, s.freechat_mentor_id ?? '')}
+      <div class="field"><label class="label">&nbsp;</label><button type="button" class="btn btn-ghost btn-sm" data-fc-self>Use my own calendar for free chats</button></div>
       ${A.fieldHtml({ name: 'calendar_host_user_id', label: 'Fallback Google Calendar host', type: 'select', options: [['', 'None — only connected mentors'], ...team.map((u) => [u.id, `${u.name || u.email} (${u.role})`])], hint: 'Hosts the event + Meet link when the mentor hasn’t connected Google Calendar. That person must connect it on the Calendar page.' }, s.calendar_host_user_id ?? '')}
       ${A.fieldHtml({ name: 'commission_percent', label: 'Commission on private sessions (%)', type: 'number', min: 0, hint: 'Currently 0 — the full fee is owed to the mentor.', disabled: true }, s.commission_percent)}
       </div><button class="btn btn-primary" type="submit">Save settings</button></form></div>`;
+    main.querySelector('[data-fc-self]').addEventListener('click', async () => {
+      try { await api('/api/admin/freechat/host-self', { method: 'POST' }); toast('Free chats now use your calendar. Set your free-chat hours on the Calendar page.'); refresh(); } catch (e) { toast(e.message, true); }
+    });
     onSubmit(main.querySelector('form'), async (dta) => {
       const body = { ...dta, renewal_reminder_days: String(dta.renewal_reminder_days).split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x)) };
       await api('/api/admin/settings', { method: 'PUT', body }); toast('Settings saved');
