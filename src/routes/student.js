@@ -129,9 +129,11 @@ r.get('/sessions', wrap(async (req, res) => {
 }));
 /** Mentor discovery: expertise / target role text filters, max price (approved services only), availability this week. */
 r.get('/mentors', wrap(async (req, res) => {
+  // Synthetic (is_test) mentors are visible only to synthetic students, so QA never reaches real students.
+  const testViewer = !!(await db.one('select is_test from anvaya.students where id = $1', [me(req)]))?.is_test;
   const mentors = await db.all(`select id, name, expertise, bio, headline, years_experience, target_roles, session_details, session_duration,
       session_price_paise, accepts_paid_sessions, photo_status = 'approved' as has_photo
-    from anvaya.mentors where status = 'active' and not is_test order by name`);
+    from anvaya.mentors where status = 'active' and (not is_test or $1) order by name`, [testViewer]);
   const services = await db.all(`select id, mentor_id, title, description, duration_min, price_paise, intake_questions from anvaya.mentor_services
     where active and approval = 'approved' order by price_paise`);
   const q = (x) => String(x || '').trim().toLowerCase();
@@ -248,7 +250,7 @@ r.get('/home', wrap(async (req, res) => {
   ];
   const checkupEnt = sub?.entitlements.find((e) => e.key === 'checkup_call');
   let next;
-  if (!sub) next = { kind: 'plan', title: 'Choose a plan to unlock your preparation', cta: 'See plans', href: '#catalog' };
+  if (!sub) next = { kind: 'plan', title: 'Choose a plan to unlock your preparation', cta: 'See plans', href: '#shop' };
   else if (!s.intake_completed_at) next = { kind: 'intake', title: 'Finish your intake so we can match you to a group', cta: 'Complete intake', href: '#intake' };
   else if (!resume) next = { kind: 'resume', title: 'Upload your resume for your mentor to review', cta: 'Upload resume', href: '#intake' };
   else if (bookings[0] && new Date(bookings[0].scheduled_at).getTime() - Date.now() < 48 * 3600e3) next = { kind: 'session', title: `Get ready for ${bookings[0].service}`, detail: bookings[0].scheduled_at, cta: 'View session', href: '#sessions' };

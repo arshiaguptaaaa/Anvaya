@@ -782,6 +782,11 @@ test('verified payment → access → confirmation email → onboarding (account
   await kc.refresh();
   const home = (await kc.get('/api/student/home')).json;
   assert.equal(home.next.kind, 'intake'); assert.equal(home.payment.status, 'verified');
+  // synthetic mentors are never shown to real students
+  const tm = await admin.post('/api/admin/mentors', { name: 'TEST hidden mentor', email: 'hidden.mentor@mentors.test', session_price_paise: 100, is_test: true });
+  await db.run("update anvaya.mentors set status = 'active' where id = $1", [tm.json.id]);
+  assert.ok(!(await kc.get('/api/student/mentors')).json.some((m) => m.id === tm.json.id), 'real student cannot see a test mentor');
+  await db.run('update anvaya.mentors set status = $2 where id = $1', [tm.json.id, 'deactivated']);
   assert.equal(home.milestones.find((m) => m.key === 'intake').done, false);
 });
 
