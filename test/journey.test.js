@@ -101,6 +101,7 @@ const APPROVED_EDITS = [
   ['10% off</div>\n          </div>\n          <div class="plan-sess">', '10% off</div>\n          </div>\n          <div class="plan-validity">Early access pricing &mdash; valid till 15th May</div>\n          <div class="plan-sess">'],
   ['your inbox.</p>\n        </details>\n      </div>', 'your inbox.</p>\n        </details>\n        <details>\n          <summary>What is the early access pricing? <span class="faq-plus">+</span></summary>\n          <p class="faq-body">The Complete Resume Build is &#8377;2,250 &mdash; a 10% discount from &#8377;2,500. Early access pricing is valid until 15th May. After that, the price returns to &#8377;2,500.</p>\n        </details>\n      </div>'],
   [/\n\n<!-- TESTIMONIALS -->[\s\S]*?<\/section>/, ''], // testimonial section (video)
+  ['<div class="footer-right"><a href="/privacy.html" style="color:inherit;text-decoration:none;">Privacy Policy</a> &nbsp;&middot;&nbsp; <a href="/terms.html" style="color:inherit;text-decoration:none;">Terms of Service</a> &nbsp;&middot;&nbsp; &copy; 2025 Anvaya &nbsp;&middot;&nbsp; Arshia</div>', '<div class="footer-right">&copy; 2025 Anvaya &nbsp;&middot;&nbsp; Arshia</div>'], // footer links to the privacy policy and terms
 ];
 test('public page = supplied brochure + only the lead-capture script tag', async () => {
   const served = Buffer.from(await (await fetch(BASE + '/')).arrayBuffer()).toString('latin1');
