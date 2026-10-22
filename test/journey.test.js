@@ -93,10 +93,13 @@ test.after(async () => { server.close(); sheet.close(); await db.end(); });
 // ═══ Public page & basics ═════════════════════════════════════════════
 const ORIGINAL_SHA = '05995cd3a1e0fa7719fd871937c3daca475666019061eaa71e628d09a5d2bff2';
 const LEAD_TAG = '<script src="/app/lead-capture.js" defer></script>\n';
+// Content edits approved by the owner, applied on top of the supplied brochure: [now, originally].
+const APPROVED_EDITS = [['<span class="hstat-n">500</span><span class="hstat-l">Resumes reviewed</span>', '<span class="hstat-n">50+</span><span class="hstat-l">Resumes reviewed</span>']];
 test('public page = supplied brochure + only the lead-capture script tag', async () => {
   const served = Buffer.from(await (await fetch(BASE + '/')).arrayBuffer()).toString('latin1');
   assert.equal(served.split(LEAD_TAG).length, 2);
-  assert.equal(crypto.createHash('sha256').update(Buffer.from(served.replace(LEAD_TAG, ''), 'latin1')).digest('hex'), ORIGINAL_SHA);
+  const reverted = APPROVED_EDITS.reduce((html, [now, was]) => { assert.equal(html.split(now).length, 2, `approved edit present once: ${now}`); return html.replace(now, was); }, served.replace(LEAD_TAG, ''));
+  assert.equal(crypto.createHash('sha256').update(Buffer.from(reverted, 'latin1')).digest('hex'), ORIGINAL_SHA, 'nothing else on the brochure changed');
 });
 
 test('dashboards are locked when signed out; CSRF enforced', async () => {
