@@ -547,11 +547,47 @@ select.chat-input option{background:var(--navy-2)}
 <style>
 /* TESTIMONIALS */
 .testimonials .proof-lead em{color:var(--gold-2);font-style:italic}
-.tm-video{margin:34px 0 0;max-width:880px}
-.tm-video video{display:block;width:100%;aspect-ratio:16/9;background:var(--navy-2);border:1px solid var(--gold-border);border-radius:var(--r);box-shadow:0 18px 60px rgba(0,0,0,.35)}
-.tm-video figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-top:16px}
-.tm-name{font-family:'Cormorant Garamond',serif;font-size:1.35rem;color:var(--ivory)}
+.tm-video{margin:34px 0 0;max-width:880px;perspective:1200px}
+@property --tm-angle{syntax:'<angle>';initial-value:0deg;inherits:false}
+.tm-frame{--rx:0deg;--ry:0deg;--mx:50%;--my:50%;position:relative;border-radius:calc(var(--r) + 2px);padding:2px;cursor:pointer;outline:none;
+  background:conic-gradient(from var(--tm-angle),rgba(201,168,76,.15),var(--gold),rgba(232,201,122,.9),rgba(201,168,76,.15) 40%,rgba(201,168,76,.15));
+  transform:rotateX(var(--rx)) rotateY(var(--ry));transition:transform .35s cubic-bezier(.2,.8,.2,1),box-shadow .45s ease;
+  box-shadow:0 18px 60px rgba(0,0,0,.35)}
+.tm-frame:hover,.tm-frame:focus-visible,.tm-frame.is-previewing{box-shadow:0 26px 80px rgba(0,0,0,.45),0 0 0 1px rgba(201,168,76,.35),0 0 60px rgba(201,168,76,.22);animation:tm-spin 4s linear infinite}
+@keyframes tm-spin{to{--tm-angle:360deg}}
+.tm-inner{position:relative;border-radius:var(--r);overflow:hidden;background:var(--navy-2)}
+.tm-inner::after{content:'';position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .4s;
+  background:radial-gradient(500px circle at var(--mx) var(--my),rgba(232,201,122,.14),transparent 45%)}
+.tm-frame:hover .tm-inner::after{opacity:1}
+.tm-video video{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;transform:scale(1.001);transition:transform 1.2s cubic-bezier(.2,.8,.2,1),filter .5s}
+.tm-frame:not(.is-engaged) video{filter:saturate(.85) brightness(.82)}
+.tm-frame.is-previewing video{transform:scale(1.035);filter:none}
+.tm-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  background:linear-gradient(180deg,rgba(8,17,31,.05),rgba(8,17,31,.55));transition:opacity .45s}
+.tm-play{width:78px;height:78px;border-radius:50%;display:grid;place-items:center;background:var(--gold);color:var(--navy);font-size:24px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;transition:transform .35s cubic-bezier(.2,.8,.2,1)}
+.tm-play span{margin-left:4px}
+.tm-play::before,.tm-play::after{content:'';position:absolute;inset:0;border-radius:50%;border:1px solid var(--gold-2);animation:tm-pulse 2.4s ease-out infinite}
+.tm-play::after{animation-delay:1.2s}
+@keyframes tm-pulse{0%{transform:scale(1);opacity:.7}100%{transform:scale(1.9);opacity:0}}
+.tm-frame:hover .tm-play{transform:scale(1.08)}
+.tm-hint{font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--ivory)}
+.tm-frame.is-previewing .tm-overlay{opacity:0}
+.tm-sound{position:absolute;left:16px;top:16px;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--navy);background:var(--gold-2);
+  padding:7px 12px;border-radius:999px;opacity:0;transform:translateY(-6px);transition:opacity .35s,transform .35s}
+.tm-frame.is-previewing .tm-sound{opacity:1;transform:none}
+.tm-progress{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(201,168,76,.18);opacity:0;transition:opacity .3s}
+.tm-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--gold),var(--gold-2))}
+.tm-frame.is-previewing .tm-progress{opacity:1}
+.tm-frame.is-engaged{cursor:default;animation:none;transform:none}
+.tm-frame.is-engaged .tm-overlay,.tm-frame.is-engaged .tm-sound,.tm-frame.is-engaged .tm-progress{display:none}
+.tm-video figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-top:18px}
+.tm-name{font-family:'Cormorant Garamond',serif;font-size:1.45rem;color:var(--ivory);position:relative}
+.tm-name::after{content:'';position:absolute;left:0;bottom:-4px;height:1px;width:0;background:var(--gold);transition:width 1.1s cubic-bezier(.2,.8,.2,1) .5s}
+.tm-video.up .tm-name::after{width:100%}
 .tm-meta{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+@media (prefers-reduced-motion: reduce){.tm-frame,.tm-frame:hover,.tm-frame.is-previewing{animation:none;transform:none}.tm-play::before,.tm-play::after{animation:none}.tm-video video{transition:none}}
+@media (max-width:700px){.tm-play{width:62px;height:62px;font-size:19px}.tm-hint{font-size:9px}}
 </style>
 </head>
 <body>
@@ -1118,12 +1154,52 @@ select.chat-input option{background:var(--navy-2)}
     <div class="eyebrow reveal">In their words</div>
     <h2 class="proof-lead reveal" style="transition-delay:.06s">Hear it from <em>Sanjana.</em></h2>
     <figure class="tm-video reveal" style="transition-delay:.12s">
-      <video controls playsinline preload="none" poster="assets/testimonials/sanjana-poster.jpg" aria-label="Video testimonial from Sanjana Sachdev (captions in the video)">
-        <source src="assets/testimonials/sanjana.mp4" type="video/mp4">
-        Your browser can&rsquo;t play this video. <a href="assets/testimonials/sanjana.mp4">Download it</a>.
-      </video>
+      <div class="tm-frame" tabindex="0" role="button" aria-label="Play Sanjana&rsquo;s video testimonial with sound">
+        <div class="tm-inner">
+          <video muted playsinline preload="metadata" poster="assets/testimonials/sanjana-poster.jpg" aria-label="Video testimonial from Sanjana Sachdev (captions in the video)">
+            <source src="assets/testimonials/sanjana.mp4" type="video/mp4">
+            Your browser can&rsquo;t play this video. <a href="assets/testimonials/sanjana.mp4">Download it</a>.
+          </video>
+          <div class="tm-overlay" aria-hidden="true"><span class="tm-play"><span>&#9654;</span></span><span class="tm-hint">Hover to preview &middot; click for sound</span></div>
+          <span class="tm-sound" aria-hidden="true">&#128263; Click for sound</span>
+          <span class="tm-progress" aria-hidden="true"><i></i></span>
+        </div>
+      </div>
       <figcaption><span class="tm-name">Sanjana Sachdev</span><span class="tm-meta">Templatolio &middot; RemoteAnalyst &mdash; Brand Delivery</span></figcaption>
     </figure>
+    <script>
+    (function () {
+      var frame = document.querySelector('#testimonials .tm-frame'); if (!frame) return;
+      var v = frame.querySelector('video'), bar = frame.querySelector('.tm-progress i');
+      var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var canHover = window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches;
+      var engaged = false;
+      function preview() { if (engaged) return; v.muted = true; var p = v.play(); if (p && p.catch) p.catch(function () {}); frame.classList.add('is-previewing'); }
+      function stop() { if (engaged) return; v.pause(); frame.classList.remove('is-previewing'); }
+      function engage() {
+        engaged = true; frame.classList.remove('is-previewing'); frame.classList.add('is-engaged');
+        v.muted = false; v.controls = true; var p = v.play(); if (p && p.catch) p.catch(function () {});
+        frame.removeAttribute('role'); frame.removeAttribute('tabindex');
+      }
+      if (canHover) { frame.addEventListener('mouseenter', preview); frame.addEventListener('mouseleave', stop); }
+      frame.addEventListener('click', function (e) { if (!engaged) { e.preventDefault(); engage(); } });
+      frame.addEventListener('keydown', function (e) { if (!engaged && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); engage(); } });
+      v.addEventListener('timeupdate', function () { if (v.duration) bar.style.width = (v.currentTime / v.duration * 100) + '%'; });
+      // Phones and tablets (no hover): muted preview while the video is on screen.
+      if (!canHover && !reduce && 'IntersectionObserver' in window) {
+        new IntersectionObserver(function (es) { es.forEach(function (en) { en.isIntersecting ? preview() : stop(); }); }, { threshold: 0.6 }).observe(frame);
+      }
+      // Subtle 3D tilt that follows the pointer.
+      if (canHover && !reduce) {
+        frame.addEventListener('mousemove', function (e) {
+          var r = frame.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+          frame.style.setProperty('--rx', (-y * 5).toFixed(2) + 'deg'); frame.style.setProperty('--ry', (x * 7).toFixed(2) + 'deg');
+          frame.style.setProperty('--mx', ((x + 0.5) * 100).toFixed(1) + '%'); frame.style.setProperty('--my', ((y + 0.5) * 100).toFixed(1) + '%');
+        });
+        frame.addEventListener('mouseleave', function () { frame.style.setProperty('--rx', '0deg'); frame.style.setProperty('--ry', '0deg'); });
+      }
+    })();
+    </script>
   </div>
 </section>
 
