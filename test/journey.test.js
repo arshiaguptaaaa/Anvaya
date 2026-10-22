@@ -800,6 +800,7 @@ test('reminders: sent on schedule without site visits; moving or cancelling a se
   const first = await reminder(`remind:%:booking:${b.json.id}:${new Date(start).getTime()}`);
   assert.ok(first.length >= 1, 'reminder created by the scheduled job');
   assert.ok(mailer.sent.some((m) => m.to === 'neha@students.test' && /Reminder: Reminder test session/.test(m.subject)));
+  assert.equal((await reminder(`remind:24h:booking:${b.json.id}:%`)).length, 0, 'no 24 h reminder for a session already inside the 2 h window');
   // a reminder still waiting for a retry is cancelled when the session moves
   await db.run("update anvaya.jobs set status = 'failed', run_at = now() + interval '1 hour' where dedupe_key like $1", [`remind:%:booking:${b.json.id}:%`]);
   const moved = new Date(new Date(start).getTime() + 30 * 60e3).toISOString();

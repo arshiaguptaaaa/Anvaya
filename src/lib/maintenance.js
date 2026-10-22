@@ -40,15 +40,17 @@ jobs.register('subscriptions.daily', async () => {
 jobs.register('sessions.reminders', async () => {
   let n = 0;
   const { roster } = require('../routes/admin/learning');
-  for (const [tag, hours] of [['24h', 24], ['2h', 2]]) {
+  // Windows don't overlap: the 24 h reminder covers 2–24 h ahead, the 2 h reminder 0–2 h, so a session booked
+  // at short notice gets one reminder, not two.
+  for (const [tag, hours, fromHours] of [['24h', 24, 2], ['2h', 2, 0]]) {
     const bookings = await db.all(`select b.id, b.scheduled_at, b.service, b.meeting_link, s.email, s.id as sid from anvaya.bookings b join anvaya.students s on s.id = b.student_id
-      where b.status = 'scheduled' and b.scheduled_at between now() and now() + make_interval(hours => $1) and s.email <> ''`, [hours]);
+      where b.status = 'scheduled' and b.scheduled_at > now() + make_interval(hours => $2) and b.scheduled_at <= now() + make_interval(hours => $1) and s.email <> ''`, [hours, fromHours]);
     for (const b of bookings) {
       const r = await jobs.enqueue('email.send', { to: b.email, template: 'session_reminder', data: { title: b.service || 'Mentor session', startsAt: b.scheduled_at, meetLink: b.meeting_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },
         { dedupeKey: `remind:${tag}:booking:${b.id}:${new Date(b.scheduled_at).getTime()}` });
       if (r) n++;
     }
-    const lives = await db.all(`select * from anvaya.live_sessions where status = 'scheduled' and starts_at between now() and now() + make_interval(hours => $1)`, [hours]);
+    const lives = await db.all(`select * from anvaya.live_sessions where status = 'scheduled' and starts_at > now() + make_interval(hours => $2) and starts_at <= now() + make_interval(hours => $1)`, [hours, fromHours]);
     for (const l of lives) {
       for (const p of (await roster(l)).filter((x) => x.email)) {
         const r = await jobs.enqueue('email.send', { to: p.email, template: 'session_reminder', data: { title: l.title, startsAt: l.starts_at, meetLink: l.meet_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },

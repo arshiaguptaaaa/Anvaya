@@ -21,7 +21,13 @@ r.get('/cron/run', wrap(async (req, res) => {
   const sent = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
   if (!secret || sent.length !== secret.length || !crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(secret))) return res.status(401).json({ error: 'unauthorized' });
   await schedulePeriodic();
-  const results = await jobs.processDue({ limit: 40 });
+  // Keep draining while work is due (e.g. reminder emails queued by the reminders job in this same run).
+  const results = [];
+  for (let pass = 0; pass < 4; pass++) {
+    const batch = await jobs.processDue({ limit: 40 });
+    results.push(...batch);
+    if (!batch.length) break;
+  }
   res.json({ ran: results.length, failed: results.filter((x) => !x.ok).length });
 }));
 
