@@ -23,6 +23,7 @@ function authUrl(state) {
 }
 
 async function exchangeCode(code) {
+  if (FAKE()) { if (code !== 'fake-code') throw new Error('invalid_grant'); return { refreshToken: 'fake-refresh', email: 'host@test' }; }
   const r = await fetch(TOKEN_URL, { method: 'POST', signal: AbortSignal.timeout(10000), headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ code, client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, redirect_uri: redirectUri(), grant_type: 'authorization_code' }) });
   const b = await r.json().catch(() => ({}));

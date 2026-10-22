@@ -10,6 +10,7 @@ const gcal = require('../lib/gcal');
 const sessions = require('../lib/sessions');
 const bookingsLib = require('../lib/bookings');
 const { HttpError, bad, v, id, wrap } = require('../lib/http');
+const jobs = require('../lib/jobs');
 
 const r = express.Router();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -48,22 +49,27 @@ r.get('/google', wrap(async (req, res) => {
 r.get('/google/connect', (req, res) => {
   if (!gcal.configured()) return res.redirect(303, `/${isStaff(req) ? 'admin' : 'mentor'}#calendar`);
   const state = sec.randomToken(24);
-  res.cookie(STATE_COOKIE, JSON.stringify({ state, uid: req.auth.user.id }), { httpOnly: true, secure: IS_PROD, sameSite: 'lax', path: '/', maxAge: 10 * 60e3 });
+  // Google's redirect back is cross-site, so the Strict session cookie isn't sent to the callback. The Lax state
+  // cookie therefore carries who started the flow, sealed (AES-GCM) so it can't be forged or altered.
+  res.cookie(STATE_COOKIE, jobs.seal({ state, uid: req.auth.user.id, exp: Date.now() + 10 * 60e3 }).enc, { httpOnly: true, secure: IS_PROD, sameSite: 'lax', path: '/', maxAge: 10 * 60e3 });
   res.redirect(303, gcal.authUrl(state));
 });
 r.get('/google/callback', wrap(async (req, res) => {
-  let saved = null; try { saved = JSON.parse(req.cookies[STATE_COOKIE] || 'null'); } catch { /* ignore */ }
+  let saved = null;
+  try { saved = req.cookies[STATE_COOKIE] ? jobs.unseal({ enc: req.cookies[STATE_COOKIE] }) : null; } catch { saved = null; }
   res.clearCookie(STATE_COOKIE, { path: '/', secure: IS_PROD, sameSite: 'lax', httpOnly: true });
   const st = String(req.query.state || '');
-  if (!saved?.state || st.length !== saved.state.length || !crypto.timingSafeEqual(Buffer.from(st), Buffer.from(saved.state)) || !req.auth || req.auth.user.id !== saved.uid) {
-    return res.status(400).type('text').send('This Google Calendar connection link expired or was opened in another browser. Please try again from the calendar page.');
-  }
-  const back = `/${isStaff(req) ? 'admin' : 'mentor'}#calendar`;
+  const expired = () => res.status(400).type('text').send('This Google Calendar connection link expired or was opened in another browser. Please try again from the calendar page.');
+  if (!saved?.state || !saved.uid || !(saved.exp > Date.now()) || st.length !== saved.state.length || !crypto.timingSafeEqual(Buffer.from(st), Buffer.from(saved.state))) return expired();
+  // Same checks as the router guard, for the user who started the flow.
+  const u = await db.one(`select u.id, u.role, u.disabled_at, m.status as mentor_status from anvaya.users u left join anvaya.mentors m on m.user_id = u.id where u.id = $1`, [saved.uid]);
+  if (!u || u.disabled_at || !(['admin', 'ops'].includes(u.role) || (u.role === 'mentor' && u.mentor_status === 'active'))) return expired();
+  const back = `/${u.role === 'mentor' ? 'mentor' : 'admin'}#calendar`;
   if (req.query.error) return res.type('html').send(`<meta http-equiv="refresh" content="0;url=${back}">`);
   try {
     const out = await gcal.exchangeCode(String(req.query.code || ''));
-    await gcal.saveConnection(req.auth.user.id, out);
-    db.audit(req.auth.user.id, 'google_calendar_connected', out.email);
+    await gcal.saveConnection(u.id, out);
+    db.audit(u.id, 'google_calendar_connected', out.email);
   } catch (e) {
     return res.status(400).type('text').send(`Google Calendar couldn't be connected: ${e.message}`);
   }
@@ -168,7 +174,6 @@ r.post('/bookings/:id/calendar-retry', wrap(async (req, res) => {
   const b = await ownBooking(req);
   if (b.status !== 'scheduled') throw bad('Only confirmed sessions have calendar events.');
   await db.run("update anvaya.bookings set calendar_status = 'pending', calendar_error = '' where id = $1", [b.id]);
-  const jobs = require('../lib/jobs');
   const jid = await jobs.enqueue('calendar.sync', { bookingId: b.id, reason: b.google_event_id ? 'reschedule' : 'confirm' }, { dedupeKey: `calretry:${b.id}:${Date.now()}`, maxAttempts: 8 });
   const out = await jobs.runNow(jid);
   const after = await db.one('select calendar_status, calendar_error, meet_link from anvaya.bookings where id = $1', [b.id]);

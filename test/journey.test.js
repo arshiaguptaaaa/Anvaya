@@ -1127,6 +1127,26 @@ test('no-show: only after the grace period, blocks every new booking/request, ke
   assert.equal((await db.one('select status, needs_review from anvaya.bookings where id = $1', [hb])).needs_review, true);
 });
 
+test('Google Calendar connect: the callback works without the (Strict) session cookie, and a forged or reused state is refused', async () => {
+  const start = await mentorA.get('/api/calendar/google/connect');
+  assert.equal(start.status, 303);
+  const state = new URL(start.location).searchParams.get('state');
+  const name = Object.keys(mentorA.cookies).find((k) => /anvaya_gcal$/.test(k));
+  const stateCookie = `${name}=${mentorA.cookies[name]}`;
+  const cb = (st, cookie, code = 'fake-code') => fetch(`${BASE}/api/calendar/google/callback?state=${encodeURIComponent(st)}&code=${code}`, { headers: cookie ? { Cookie: cookie } : {}, redirect: 'manual' });
+  assert.equal((await cb(state, null)).status, 400, 'no state cookie');
+  assert.equal((await cb('wrong-state-wrong-state-wrong-st', stateCookie)).status, 400, 'state mismatch');
+  const forged = `${name}=${encodeURIComponent(JSON.stringify({ state, uid: 1 }))}`;
+  assert.equal((await cb(state, forged)).status, 400, 'unsealed cookie refused');
+  const ok = await cb(state, stateCookie); // exactly what the browser sends on Google's cross-site redirect
+  assert.equal(ok.status, 200, await ok.clone().text());
+  assert.match(await ok.text(), /mentor#calendar/);
+  const conn = await db.one("select c.google_email, c.status from anvaya.calendar_connections c join anvaya.mentors m on m.user_id = c.user_id where m.id = $1", [ids.mentorA]);
+  assert.equal(conn.google_email, 'host@test'); assert.equal(conn.status, 'active');
+  assert.equal((await mentorA.get('/api/calendar/google')).json.connection.status, 'active');
+  await db.run('delete from anvaya.calendar_connections');
+});
+
 test('availability: weekly hours, blocked dates and Google busy times shape the bookable slots; students never see private details', async () => {
   const avail = (await mentorA.get('/api/calendar/availability')).json;
   assert.ok(avail.weekly.length >= 7);
