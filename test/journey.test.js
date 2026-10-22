@@ -96,7 +96,10 @@ const LEAD_TAG = '<script src="/app/lead-capture.js" defer></script>\n';
 // Content edits approved by the owner, applied on top of the supplied brochure: [now, originally].
 const APPROVED_EDITS = [
   ['<span class="hstat-n">500</span><span class="hstat-l">Resumes reviewed</span>', '<span class="hstat-n">50+</span><span class="hstat-l">Resumes reviewed</span>'],
-  [/<style>\n\/\* TESTIMONIALS \*\/[\s\S]*?<\/style>\n<\/head>/, '</head>'], // testimonial styles
+  [/<style>\n\/\* TESTIMONIALS \*\/[\s\S]*?<\/script>\n<\/head>/, '</head>'], // testimonial styles + scroll-arrival polish
+  ['\n          <div class="plan-cat">Complete Resume Build</div>', '\n          <div class="plan-badge">&#x2B21; &nbsp;Early Access &mdash; Ends 15th May</div>\n          <div class="plan-cat">Complete Resume Build</div>'],
+  ['10% off</div>\n          </div>\n          <div class="plan-sess">', '10% off</div>\n          </div>\n          <div class="plan-validity">Early access pricing &mdash; valid till 15th May</div>\n          <div class="plan-sess">'],
+  ['your inbox.</p>\n        </details>\n      </div>', 'your inbox.</p>\n        </details>\n        <details>\n          <summary>What is the early access pricing? <span class="faq-plus">+</span></summary>\n          <p class="faq-body">The Complete Resume Build is &#8377;2,250 &mdash; a 10% discount from &#8377;2,500. Early access pricing is valid until 15th May. After that, the price returns to &#8377;2,500.</p>\n        </details>\n      </div>'],
   [/\n\n<!-- TESTIMONIALS -->[\s\S]*?<\/section>/, ''], // testimonial section (video)
 ];
 test('public page = supplied brochure + only the lead-capture script tag', async () => {
