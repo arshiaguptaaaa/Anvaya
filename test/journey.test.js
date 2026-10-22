@@ -17,7 +17,7 @@ Object.assign(process.env, {
   PORT: String(PORT), APP_BASE_URL: `http://localhost:${PORT}`, CRON_SECRET: 'cron-test-secret', EXTRA_ORIGINS: 'https://anvayacareers.in',
   ADMIN_EMAIL: 'admin@anvaya.test', ADMIN_PASSWORD: 'Admin-pass-2026',
   RAZORPAY_KEY_ID: 'rzp_fake_test', RAZORPAY_KEY_SECRET: 'rzp-secret', RAZORPAY_WEBHOOK_SECRET: 'whsec-test',
-  GOOGLE_SHEET_WEBHOOK_URL: `http://localhost:${SHEET_PORT}/exec`,
+  GOOGLE_SHEET_WEBHOOK_URL: `http://localhost:${SHEET_PORT}/exec`, GOOGLE_CALENDAR_FAKE: '1',
 });
 const app = require('../src/app');
 const db = require('../src/db');
@@ -473,7 +473,25 @@ test('check-ups: booked within plan limits; database prevents double booking und
   const slots = (await stu1.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
   assert.ok(slots.length > 10);
   const c1 = await stu1.post('/api/student/bookings/checkup', { scheduled_at: slots[0] });
-  assert.equal(c1.status, 201, c1.text); assert.equal(c1.json.status, 'scheduled');
+  assert.equal(c1.status, 201, c1.text); assert.equal(c1.json.status, 'requested', 'a request, held for approval');
+  assert.ok(new Date(c1.json.hold_expires_at) < new Date(slots[0]), 'hold ends before the session');
+  const req1 = lastEmailTo('rahul@students.test');
+  assert.match(req1.subject, /^Request received/); assert.match(req1.text, /not yet confirmed/i); assert.doesNotMatch(req1.subject, /confirmed/i);
+  assert.match(lastEmailTo('priya@mentors.test').subject, /^New session request/);
+  const ap = await mentorA.post(`/api/calendar/bookings/${c1.json.id}/approve`);
+  assert.equal(ap.status, 200, ap.text); assert.equal(ap.json.next, 'confirmed');
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  const conf = lastEmailTo('rahul@students.test');
+  assert.match(conf.subject, /^Confirmed: Check-up call/);
+  assert.match(conf.text, /Join Google Meet: https:\/\/meet\.google\.com\/fak-/); assert.match(conf.text, /Add to Google Calendar: https:\/\/calendar\.google\.com/);
+  assert.match(conf.text, /\.ics\): http.*\/api\/public\/ics\//); assert.match(conf.text, /up to 2 hours before/); assert.match(conf.text, /No-show policy/);
+  assert.equal(conf.attachments[0].filename, 'anvaya-session.ics'); assert.match(conf.attachments[0].content, /BEGIN:VEVENT/);
+  assert.match(lastEmailTo('priya@mentors.test').subject, /^Confirmed: Check-up call/, 'host confirmed too');
+  const icsLink = conf.text.match(/http\S+\/api\/public\/ics\/\S+/)[0];
+  const ics = await fetch(icsLink.replace(/^https?:\/\/[^/]+/, BASE));
+  assert.equal(ics.status, 200); assert.match(await ics.text(), /UID:booking-\d+@anvayacareers.in/);
+  assert.equal((await fetch(icsLink.replace(/^https?:\/\/[^/]+/, BASE).replace(/sig=.*/, 'sig=forged'))).status, 404, 'unsigned .ics links refused');
+  assert.equal((await mentorB.post(`/api/calendar/bookings/${c1.json.id}/approve`)).status, 404, 'other mentors cannot act on it');
   const [a, b] = await Promise.all([
     stu1.post('/api/student/bookings/checkup', { mentor_id: ids.mentorA, scheduled_at: slots[1] }),
     stu2.post('/api/student/bookings/checkup', { mentor_id: ids.mentorA, scheduled_at: slots[1] }),
@@ -491,13 +509,20 @@ test('paid private session: hold → Razorpay payment → scheduled → complete
   const slots = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
   const r = await stu2.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slots[5] });
   assert.equal(r.status, 201, r.text);
-  assert.equal(r.json.status, 'pending_payment');
-  assert.equal(r.json.checkout.amount_paise, rupees(2500), 'student pays the mentor’s stated fee');
-  assert.equal((await stu1.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slots[5] })).status, 409, 'slot held while paying');
+  assert.equal(r.json.status, 'requested', 'paid sessions are requested first; payment after approval');
+  assert.equal((await stu1.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slots[5] })).status, 409, 'slot held while awaiting approval');
+  assert.equal((await stu2.post(`/api/student/bookings/${r.json.booking_id}/pay`)).status, 404, 'nothing to pay before approval');
+  const appr = await mentorA.post(`/api/calendar/bookings/${r.json.booking_id}/approve`);
+  assert.equal(appr.json.next, 'payment');
+  assert.match(lastEmailTo('neha@students.test').subject, /^Approved, payment due/);
+  const payStart = await stu2.post(`/api/student/bookings/${r.json.booking_id}/pay`);
+  assert.equal(payStart.json.checkout.amount_paise, rupees(2500), 'student pays the mentor’s stated fee');
+  r.json.checkout = payStart.json.checkout;
   const pay = fakePay(r.json.checkout.razorpay_order_id, rupees(2500), { fee: 5000, tax: 900 });
   assert.equal((await stu2.post('/api/student/payments/verify', pay)).json.status, 'paid');
   const b = await db.one('select * from anvaya.bookings where id = $1', [r.json.booking_id]);
   assert.equal(b.status, 'scheduled'); assert.equal(b.mentor_fee_paise, rupees(2500), 'zero commission');
+  assert.equal(b.calendar_status, 'synced'); assert.match(b.meet_link, /^https:\/\/meet\.google\.com\//);
   assert.equal((await mentorA.post(`/api/mentor/bookings/${b.id}/complete`)).status, 400, 'not before it starts');
   await db.run("update anvaya.bookings set scheduled_at = now() - interval '3 hours' where id = $1", [b.id]);
   assert.equal((await mentorA.patch(`/api/mentor/bookings/${b.id}`, { session_notes: 'Mapped target roles' })).status, 200);
@@ -521,6 +546,8 @@ test('expired payment holds release the slot; late payments are flagged, not los
   const slots = (await stu1.get(`/api/student/mentors/${ids.mentorB}/slots`)).json;
   const r = await stu1.post('/api/student/bookings/paid', { mentor_id: ids.mentorB, scheduled_at: slots[0] });
   assert.equal(r.status, 201, r.text);
+  await mentorB.post(`/api/calendar/bookings/${r.json.booking_id}/approve`);
+  r.json.checkout = (await stu1.post(`/api/student/bookings/${r.json.booking_id}/pay`)).json.checkout;
   await db.run("update anvaya.bookings set hold_expires_at = now() - interval '1 minute' where id = $1", [r.json.booking_id]);
   const took = await stu2.post('/api/student/bookings/paid', { mentor_id: ids.mentorB, scheduled_at: slots[0] });
   assert.equal(took.status, 201, took.text);
@@ -821,7 +848,7 @@ test('reminders: sent on schedule without site visits; moving or cancelling a se
   assert.ok((await reminder(`remind:%:booking:${b.json.id}:${new Date(start).getTime()}`)).every((j) => j.status === 'cancelled'), 'old-time reminders cancelled');
   await cron();
   assert.ok((await reminder(`remind:%:booking:${b.json.id}:${new Date(moved).getTime()}`)).length >= 1, 'fresh reminders for the new time');
-  assert.ok(mailer.sent.some((m) => m.to === 'neha@students.test' && /^Moved: Reminder test session/.test(m.subject)));
+  assert.ok(mailer.sent.some((m) => m.to === 'neha@students.test' && /^Rescheduled: Reminder test session/.test(m.subject)));
   assert.ok((await db.one('select reschedule_count from anvaya.bookings where id = $1', [b.json.id])).reschedule_count === 1);
   await admin.patch(`/api/admin/bookings/${b.json.id}`, { status: 'cancelled', cancel_reason: 'Mentor unavailable' });
   await cron();
@@ -876,7 +903,7 @@ test('mentor services: submitted → admin-approved → bookable with its own du
   await mentorA.patch(`/api/mentor/bookings/${row.id}`, { notes_visibility: 'student' });
   home = (await stu1.get('/api/student/home')).json;
   assert.equal(home.sessions.bookings.find((x) => x.id === row.id).shared_notes, 'Strong structure; add metrics.');
-  assert.ok(!(await mentorA.get('/api/mentor/agenda')).json.some((x) => x.id === row.id), 'unpaid holds stay off the agenda');
+  assert.equal((await mentorA.get('/api/mentor/agenda')).json.find((x) => x.id === row.id)?.status, 'requested', 'requests show on the agenda for approval');
   assert.ok((await mentorA.get('/api/mentor/agenda')).json.every((x) => ['scheduled', 'requested'].includes(x.status)));
 });
 
@@ -953,6 +980,167 @@ test('existing payment page (public key only): verified webhook activates the pu
   assert.ok(!(await db.one("select 1 from anvaya.students where email in ('low@buyers.test','unk@buyers.test')")), 'nothing activated for mismatches');
   const flags = await db.all("select title from anvaya.tasks where dedupe_key like 'page-pay-flag:%'");
   assert.ok(flags.some((f) => /pay_page_low.*below/.test(f.title)) && flags.some((f) => /pay_page_unknown.*not recognised/.test(f.title)));
+});
+
+// ═══ Session lifecycle: requests, calendar, cutoff, no-shows ═══════════════
+const gcal = require('../src/lib/gcal');
+const sessionsLib = require('../src/lib/sessions');
+const book = async (client, slot) => {
+  const r = await client.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slot });
+  assert.equal(r.status, 201, r.text); return r.json.booking_id;
+};
+const confirmByStaff = async (bid) => { assert.equal((await admin.patch(`/api/admin/bookings/${bid}`, { status: 'scheduled' })).status, 200); await jobs.processDue({ kinds: ['email.send'], limit: 50 }); };
+
+test('requests: concurrent requests for one slot, hold expiry releases it with an email, decline and suggest-another-time', async () => {
+  await stu2.login('neha@students.test', 'Student-pass-1').catch(() => {});
+  const slots = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  const [x, y] = await Promise.all([stu1.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slots[10] }), stu2.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slots[10] })]);
+  assert.deepEqual([x.status, y.status].sort(), [201, 409], 'only one request can hold a slot');
+  const held = (x.status === 201 ? x : y).json.booking_id;
+  assert.ok(!(await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.includes(slots[10]), 'held slot hidden');
+  // expiry
+  await db.run("update anvaya.bookings set hold_expires_at = now() - interval '1 minute' where id = $1", [held]);
+  await jobs.runNow(await jobs.enqueue('bookings.expire_holds', {}));
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  assert.equal((await db.one('select status, cancel_reason from anvaya.bookings where id = $1', [held])).cancel_reason, 'Request expired before approval');
+  assert.ok(mailer.sent.some((m) => /^Request expired/.test(m.subject)));
+  assert.ok((await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.includes(slots[10]), 'slot free again');
+  // decline
+  const d = await book(stu2, slots[11]);
+  assert.equal((await mentorA.post(`/api/calendar/bookings/${d}/decline`, { reason: 'Travelling that day' })).status, 200);
+  assert.match(lastEmailTo('neha@students.test').subject, /^Not available/);
+  assert.ok((await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.includes(slots[11]));
+  // suggest another time → student accepts → (paid) payment needed
+  const sg = await book(stu2, slots[12]);
+  assert.equal((await mentorA.post(`/api/calendar/bookings/${sg}/suggest`, { scheduled_at: slots[14] })).status, 200);
+  assert.match(lastEmailTo('neha@students.test').subject, /^New time suggested/);
+  const after = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  assert.ok(after.includes(slots[12]) && !after.includes(slots[14]), 'old slot released, suggested slot reserved');
+  assert.equal((await stu1.post(`/api/student/bookings/${sg}/accept-proposal`)).status, 404, 'only the requester can accept');
+  assert.equal((await stu2.post(`/api/student/bookings/${sg}/accept-proposal`)).json.next, 'payment');
+  // student can send preferred dates when nothing fits
+  assert.equal((await stu2.post('/api/student/session-requests', { kind: 'paid_session', mentor_id: ids.mentorA, preferred: 'Any weekday after 7 pm next week' })).status, 201);
+  assert.ok((await admin.get('/api/admin/session-requests')).json.some((x2) => /after 7 pm/.test(x2.preferred)));
+});
+
+test('calendar: no Meet link means no confirmation; failure shown to staff and retried; reschedule updates the same event and emails both', async () => {
+  const slots = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  const bid = await book(stu2, slots[16]);
+  gcal.fake.fail = true;
+  const before = mailer.sent.length;
+  await admin.patch(`/api/admin/bookings/${bid}`, { status: 'scheduled' });
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  let b = await db.one('select * from anvaya.bookings where id = $1', [bid]);
+  assert.equal(b.status, 'scheduled'); assert.equal(b.calendar_status, 'failed'); assert.equal(b.meet_link, null);
+  assert.ok(!mailer.sent.slice(before).some((m) => /^Confirmed/.test(m.subject)), 'no confirmation without a real Meet link');
+  assert.ok((await admin.get('/api/admin/queues/unassigned')).json.some((x) => /Calendar\/Meet failed/.test(x.title)) || (await db.one("select 1 from anvaya.tasks where dedupe_key like $1 and status = 'open'", [`calfail:${bid}:%`])), 'staff see the failure');
+  const ev = (await admin.get(`/api/calendar/events?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 40 * 86400e3).toISOString())}`)).json.bookings.find((x) => x.id === bid);
+  assert.equal(ev.calendar_status, 'failed'); assert.match(ev.calendar_error, /simulated failure/);
+  gcal.fake.fail = false;
+  const retry = await mentorA.post(`/api/calendar/bookings/${bid}/calendar-retry`);
+  assert.equal(retry.json.calendar_status, 'synced'); assert.match(retry.json.meet_link, /meet\.google\.com/);
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  assert.match(lastEmailTo('neha@students.test').subject, /^Confirmed/);
+  assert.ok(!(await db.one("select 1 from anvaya.tasks where dedupe_key like $1 and status = 'open'", [`calfail:${bid}:%`])), 'failure task closed once synced');
+  // the student reschedules (more than 2 h ahead): same event, both notified, reminders for the old time cancelled
+  b = await db.one('select * from anvaya.bookings where id = $1', [bid]);
+  const target = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.at(-1);
+  assert.equal((await stu2.post(`/api/student/bookings/${bid}/reschedule`, { scheduled_at: target })).status, 200);
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  const moved = await db.one('select * from anvaya.bookings where id = $1', [bid]);
+  assert.equal(moved.google_event_id, b.google_event_id, 'existing event updated, not duplicated');
+  assert.equal(new Date(gcal.fake.events.get(b.google_event_id).start).toISOString(), new Date(target).toISOString());
+  assert.match(lastEmailTo('neha@students.test').subject, /^Rescheduled/); assert.match(lastEmailTo('priya@mentors.test').subject, /^Rescheduled/);
+  // email log tracks states; a Resend webhook marks delivered
+  const log = (await admin.get(`/api/admin/email-log?booking_id=${bid}`)).json;
+  assert.ok(log.length >= 3 && log.every((l) => ['sent', 'queued', 'failed', 'delivered'].includes(l.status)));
+  await db.run("update anvaya.email_log set provider_id = 'res_test_1' where id = $1", [log[0].id]);
+  process.env.RESEND_WEBHOOK_SECRET = `whsec_${Buffer.from('resend-test-secret').toString('base64')}`;
+  const body = JSON.stringify({ type: 'email.delivered', data: { email_id: 'res_test_1' } }), sid = 'msg_1', ts = String(Math.floor(Date.now() / 1000));
+  const sig = crypto.createHmac('sha256', Buffer.from('resend-test-secret')).update(`${sid}.${ts}.${body}`).digest('base64');
+  assert.equal((await fetch(`${BASE}/api/webhooks/resend`, { method: 'POST', body, headers: { 'svix-id': sid, 'svix-timestamp': ts, 'svix-signature': 'v1,bad' } })).status, 401);
+  assert.equal((await fetch(`${BASE}/api/webhooks/resend`, { method: 'POST', body, headers: { 'svix-id': sid, 'svix-timestamp': ts, 'svix-signature': `v1,${sig}` } })).status, 200);
+  assert.equal((await db.one('select status from anvaya.email_log where id = $1', [log[0].id])).status, 'delivered');
+  delete process.env.RESEND_WEBHOOK_SECRET;
+  ids.calBooking = bid;
+});
+
+test('two-hour cutoff: self-service reschedule/cancel stops inside 2 h; staff can still act', async () => {
+  const bid = ids.calBooking;
+  await db.run("update anvaya.bookings set scheduled_at = now() + interval '90 minutes' where id = $1", [bid]);
+  const later = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.at(-2);
+  const rs = await stu2.post(`/api/student/bookings/${bid}/reschedule`, { scheduled_at: later });
+  assert.equal(rs.status, 400); assert.match(rs.json.error, /within 2 hours/);
+  const cn = await stu2.post(`/api/student/bookings/${bid}/cancel`);
+  assert.equal(cn.status, 400); assert.match(cn.json.error, /support request/);
+  const home = (await stu2.get('/api/student/home')).json.sessions.bookings.find((x) => x.id === bid);
+  assert.equal(home.can_reschedule, false); assert.equal(home.needs_exception, true);
+  await db.run("update anvaya.bookings set scheduled_at = now() + interval '3 hours' where id = $1", [bid]);
+  assert.equal((await stu2.get('/api/student/home')).json.sessions.bookings.find((x) => x.id === bid).can_reschedule, true, 'allowed again outside 2 h');
+});
+
+test('no-show: only after the grace period, blocks every new booking/request, keeps existing access, dispute → admin reversal restores access', async () => {
+  const bid = ids.calBooking;
+  await db.run("update anvaya.bookings set scheduled_at = now() - interval '5 minutes' where id = $1", [bid]);
+  const early = await mentorA.post(`/api/calendar/bookings/${bid}/outcome`, { outcome: 'student_no_show', reason: 'Waited' });
+  assert.equal(early.status, 400); assert.match(early.json.error, /15 minutes after the start/);
+  await db.run("update anvaya.bookings set scheduled_at = now() - interval '40 minutes' where id = $1", [bid]);
+  assert.equal((await mentorA.post(`/api/calendar/bookings/${bid}/outcome`, { outcome: 'student_no_show' })).status, 400, 'reason required');
+  assert.equal((await stu2.post(`/api/calendar/bookings/${bid}/outcome`, { outcome: 'student_no_show', reason: 'x' })).status, 403, 'students cannot mark outcomes');
+  const before = mailer.sent.length;
+  assert.equal((await mentorA.post(`/api/calendar/bookings/${bid}/outcome`, { outcome: 'student_no_show', reason: 'Waited 20 minutes and messaged twice' })).status, 200);
+  await jobs.processDue({ kinds: ['email.send'], limit: 50 });
+  const ns = mailer.sent.slice(before);
+  const toStudent = ns.find((m) => m.to === 'neha@students.test');
+  assert.match(toStudent.subject, /^Missed session/); assert.match(toStudent.text, /paused/); assert.match(toStudent.text, /Dispute it: http/);
+  assert.doesNotMatch(toStudent.text, /Waited 20 minutes/, 'internal note not in the student email');
+  assert.ok(ns.some((m) => m.to === 'admin@anvaya.test' && /^No-show recorded/.test(m.subject)), 'admin notified');
+  const ev = await db.one('select * from anvaya.no_show_events where booking_id = $1', [bid]);
+  assert.ok(ev.marked_by && ev.marked_at && ev.reason);
+  // blocked everywhere a student can create or move a session
+  const slots = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  for (const [label, call] of [
+    ['paid request', () => stu2.post('/api/student/bookings/paid', { mentor_id: ids.mentorA, scheduled_at: slots[20] })],
+    ['check-up', () => stu2.post('/api/student/bookings/checkup', { mentor_id: ids.mentorA, scheduled_at: slots[20] })],
+    ['preferred dates', () => stu2.post('/api/student/session-requests', { preferred: 'any' })],
+  ]) { const r = await call(); assert.equal(r.status, 403, `${label}: ${r.text}`); assert.match(r.json.error, /paused/); }
+  assert.equal((await admin.post('/api/admin/bookings', { student_id: ids.s2, mentor_id: ids.mentorA, kind: 'paid_session', scheduled_at: slots[21] })).status, 403, 'staff-created bookings blocked too');
+  assert.equal((await stu2.get('/api/student/home')).json.booking_blocked, true);
+  assert.equal((await stu2.get('/api/student/me')).status, 200, 'account access preserved');
+  // dispute → admin reverses → access restored + email
+  const dsp = await stu2.post('/api/student/no-show/dispute', { body: 'I joined at 6:31 but the link said waiting for host.' });
+  assert.equal(dsp.status, 201, dsp.text);
+  assert.equal((await stu2.post('/api/student/no-show/dispute', { body: 'again' })).status, 400);
+  assert.ok((await admin.get('/api/admin/support')).json.some((c) => c.id === dsp.json.caseId && c.category === 'no_show_dispute'));
+  assert.equal((await ops.post(`/api/admin/no-shows/${ev.id}/reverse`, { reason: 'Join log shows the student waited' })).status, 403, 'only an admin can reverse');
+  assert.equal((await admin.post(`/api/admin/no-shows/${ev.id}/reverse`, { reason: 'Join log shows the student waited' })).json.unblocked, true);
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  assert.match(lastEmailTo('neha@students.test').subject, /booking access is restored/);
+  assert.equal((await stu2.post('/api/student/session-requests', { preferred: 'Thursday evening' })).status, 201, 'can request again');
+  // host absence / technical problems never penalise the student
+  const hb = await book(stu2, slots[22]);
+  await confirmByStaff(hb);
+  await db.run("update anvaya.bookings set scheduled_at = now() - interval '30 minutes' where id = $1", [hb]);
+  assert.equal((await mentorA.post(`/api/calendar/bookings/${hb}/outcome`, { outcome: 'host_absent', reason: 'Mentor emergency' })).status, 200);
+  assert.equal((await stu2.get('/api/student/home')).json.booking_blocked, false);
+  assert.equal((await db.one('select status, needs_review from anvaya.bookings where id = $1', [hb])).needs_review, true);
+});
+
+test('availability: weekly hours, blocked dates and Google busy times shape the bookable slots; students never see private details', async () => {
+  const avail = (await mentorA.get('/api/calendar/availability')).json;
+  assert.ok(avail.weekly.length >= 7);
+  const slots = (await stu1.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  const day = new Date(new Date(slots[30]).getTime() + 5.5 * 3600e3).toISOString().slice(0, 10);
+  assert.equal((await mentorA.post('/api/calendar/overrides', { day, kind: 'blocked', note: 'Conference' })).status, 201);
+  const afterBlock = (await stu1.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  assert.ok(!afterBlock.some((x) => new Date(new Date(x).getTime() + 5.5 * 3600e3).toISOString().slice(0, 10) === day), 'blocked day has no slots');
+  assert.equal((await mentorB.post('/api/calendar/overrides', { day, kind: 'blocked', mentor_id: ids.mentorA })).status, 201, 'a mentor’s mentor_id is always themselves');
+  assert.equal((await stu1.get('/api/calendar/availability')).status, 403);
+  gcal.fake.busy = [[slots[40], new Date(new Date(slots[40]).getTime() + 3600e3).toISOString()]];
+  assert.ok(!(await stu1.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.includes(slots[40]), 'Google busy time excluded');
+  gcal.fake.busy = [];
+  const s0 = (await stu1.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  assert.ok(s0.every((x) => typeof x === 'string'), 'students get start times only');
 });
 
 test('deactivating a mentor ends sessions immediately; disabled staff cannot sign in', async () => {

@@ -328,6 +328,30 @@ r.patch('/support/:id', staff, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── No-shows: review, dispute, reversal (admin restores booking access) ──
+r.get('/no-shows', staff, wrap(async (req, res) => {
+  res.json(await db.all(`select e.*, s.name as student_name, b.service, b.scheduled_at, coalesce(nullif(u.name,''), u.email) as marked_by_name,
+      s.booking_blocked_at is not null as student_blocked
+    from anvaya.no_show_events e join anvaya.students s on s.id = e.student_id join anvaya.bookings b on b.id = e.booking_id
+    left join anvaya.users u on u.id = e.marked_by order by e.status = 'active' desc, e.marked_at desc limit 200`));
+}));
+r.post('/no-shows/:id/reverse', require('./_shared').adminOnly, wrap(async (req, res) => {
+  const ev = await require('../../lib/sessions').reverseNoShow(id(req), req.auth.user, v.str(req.body?.reason, { max: 500, required: true, label: 'Reason' }));
+  res.json({ ok: true, unblocked: ev.unblocked });
+}));
+r.get('/session-requests', staff, wrap(async (_req, res) => {
+  res.json(await db.all(`select r.*, s.name as student_name, m.name as mentor_name from anvaya.session_requests r join anvaya.students s on s.id = r.student_id
+    left join anvaya.mentors m on m.id = r.mentor_id order by r.status = 'open' desc, r.created_at desc limit 200`));
+}));
+r.patch('/session-requests/:id', staff, wrap(async (req, res) => {
+  await db.run('update anvaya.session_requests set status = $2 where id = $1', [id(req), v.oneOf(req.body?.status, ['open', 'scheduled', 'closed'], 'Status')]);
+  res.json({ ok: true });
+}));
+r.get('/email-log', staff, wrap(async (req, res) => {
+  res.json(await db.all('select id, to_email, template, booking_id, status, error, created_at, updated_at from anvaya.email_log where ($1::bigint is null or booking_id = $1) order by id desc limit 200',
+    [v.id(req.query.booking_id, 'Booking')]));
+}));
+
 // ── Mentor services: approval (prices are financial, so admin-only) ──
 const { adminOnly } = require('./_shared');
 r.get('/mentor-services', staff, wrap(async (req, res) => {

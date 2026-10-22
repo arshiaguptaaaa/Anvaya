@@ -43,12 +43,17 @@ jobs.register('sessions.reminders', async () => {
   // Windows don't overlap: the 24 h reminder covers 2–24 h ahead, the 2 h reminder 0–2 h, so a session booked
   // at short notice gets one reminder, not two.
   for (const [tag, hours, fromHours] of [['24h', 24, 2], ['2h', 2, 0]]) {
-    const bookings = await db.all(`select b.id, b.scheduled_at, b.service, b.meeting_link, s.email, s.id as sid from anvaya.bookings b join anvaya.students s on s.id = b.student_id
+    const bookings = await db.all(`select b.id, b.scheduled_at, b.service, b.meet_link, s.email, s.id as sid, mu.email as mentor_email from anvaya.bookings b join anvaya.students s on s.id = b.student_id
+      left join anvaya.mentors m on m.id = b.mentor_id left join anvaya.users mu on mu.id = m.user_id
       where b.status = 'scheduled' and b.scheduled_at > now() + make_interval(hours => $2) and b.scheduled_at <= now() + make_interval(hours => $1) and s.email <> ''`, [hours, fromHours]);
     for (const b of bookings) {
-      const r = await jobs.enqueue('email.send', { to: b.email, template: 'session_reminder', data: { title: b.service || 'Mentor session', startsAt: b.scheduled_at, meetLink: b.meeting_link, dashboardUrl: `${BASE_URL()}/student#sessions` } },
-        { dedupeKey: `remind:${tag}:booking:${b.id}:${new Date(b.scheduled_at).getTime()}` });
-      if (r) n++;
+      for (const [to, who] of [[b.email, 'student'], [b.mentor_email, 'host']]) {
+        if (!to) continue;
+        const r = await jobs.enqueue('email.send', { to, template: 'session_reminder', data: { title: b.service || 'Mentor session', startsAt: b.scheduled_at, meetLink: b.meet_link,
+          dashboardUrl: `${BASE_URL()}/${who === 'host' ? 'mentor' : 'student'}#sessions`, __bookingId: b.id } },
+        { dedupeKey: `remind:${tag}:booking:${b.id}:${new Date(b.scheduled_at).getTime()}${who === 'host' ? ':host' : ''}` });
+        if (r) { n++; await db.run('insert into anvaya.email_log (job_id, to_email, template, booking_id) values ($1,$2,$3,$4) on conflict (job_id) do nothing', [r, to, 'session_reminder', b.id]); }
+      }
     }
     const lives = await db.all(`select * from anvaya.live_sessions where status = 'scheduled' and starts_at > now() + make_interval(hours => $2) and starts_at <= now() + make_interval(hours => $1)`, [hours, fromHours]);
     for (const l of lives) {
@@ -73,7 +78,7 @@ jobs.register('maintenance.cleanup', async () => {
 async function schedulePeriodic() {
   const hour = new Date().toISOString().slice(0, 13);
   const day = hour.slice(0, 10);
-  await jobs.enqueue('bookings.release_holds', {}, { dedupeKey: `holds:${hour}:${Math.floor(new Date().getMinutes() / 10)}` });
+  await jobs.enqueue('bookings.expire_holds', {}, { dedupeKey: `expire:${hour}:${Math.floor(new Date().getMinutes() / 5)}` });
   await jobs.enqueue('sessions.reminders', {}, { dedupeKey: `reminders:${hour}:${Math.floor(new Date().getMinutes() / 5)}` });
   await jobs.enqueue('payments.reconcile', {}, { dedupeKey: `reconcile:${hour}` });
   await jobs.enqueue('subscriptions.daily', {}, { dedupeKey: `subs:${day}` });

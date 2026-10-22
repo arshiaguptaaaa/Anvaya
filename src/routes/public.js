@@ -64,6 +64,19 @@ r.post('/public/leads', leadLimiter, wrap(async (req, res) => {
   jobs.kick();
 }));
 
+// ── Calendar invitation (.ics) for a confirmed session; the link is signed so it works without signing in ──
+r.get('/public/ics/:id', wrap(async (req, res) => {
+  const sessions = require('../lib/sessions');
+  const bid = Number(req.params.id);
+  const sig = String(req.query.sig || '');
+  const good = sessions.icsSig(bid);
+  if (!Number.isInteger(bid) || sig.length !== good.length || !require('node:crypto').timingSafeEqual(Buffer.from(sig), Buffer.from(good))) throw new HttpError(404, 'Not found.');
+  const b = await sessions.load(bid);
+  if (!b || !['scheduled', 'cancelled'].includes(b.status) || !b.meet_link) throw new HttpError(404, 'This session has no calendar invitation yet.');
+  res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': 'attachment; filename="anvaya-session.ics"', 'Cache-Control': 'no-store' });
+  res.send(sessions.buildIcs(b, { cancelled: b.status === 'cancelled' }));
+}));
+
 // ── Public payment page → server checkout ──────────────────────────────
 // The page sends only the plan key and the buyer's details. Price and referral discount are decided here,
 // Razorpay's signature is verified here (and again by the webhook), and fulfilment, the confirmation email,

@@ -105,7 +105,7 @@
   const PILL = {
     invite_pending: ['Invite pending', ''], active: ['Active', 'ok'], deactivated: ['Deactivated', 'off'],
     new: ['New', ''], contacted: ['Contacted', ''], qualified: ['Qualified', 'ok'], converted: ['Converted', 'ok'], lost: ['Lost', 'off'],
-    scheduled: ['Scheduled', ''], requested: ['Awaiting payment', ''], pending_payment: ['Paying…', ''], completed: ['Completed', 'ok'], cancelled: ['Cancelled', 'off'], no_show: ['No-show', 'bad'],
+    scheduled: ['Confirmed', 'ok'], requested: ['Requested', ''], pending_payment: ['Awaiting payment', ''], completed: ['Completed', 'ok'], cancelled: ['Cancelled', 'off'], no_show: ['No-show', 'bad'],
     paid: ['Paid', 'ok'], pending: ['Pending', ''], refunded: ['Refunded', 'off'], partially_refunded: ['Part-refunded', 'off'], failed: ['Failed', 'bad'], created: ['Unpaid', ''],
     paused: ['Paused', 'off'], grace: ['Grace period', ''], expired: ['Expired', 'bad'], due: ['Due', ''], overdue: ['Overdue', 'bad'], waived: ['Waived', 'ok'],
     present: ['Present', 'ok'], late: ['Late', ''], absent: ['Absent', 'bad'], excused: ['Excused', 'off'],

@@ -115,7 +115,7 @@ r.get('/bookings', wrap(async (req, res) => {
     b.session_notes, b.notes_visibility, b.intake_answers, b.service_id, b.completed_at, s.name as student_name,
     (select ms.intake_questions from anvaya.mentor_services ms where ms.id = b.service_id) as intake_questions,
     (select status from anvaya.attendance a where a.booking_id = b.id) as attendance
-    from anvaya.bookings b join anvaya.students s on s.id = b.student_id where b.mentor_id = $1 and b.status <> 'pending_payment' order by b.scheduled_at desc`, [req.auth.mentor.id]));
+    from anvaya.bookings b join anvaya.students s on s.id = b.student_id where b.mentor_id = $1 order by b.scheduled_at desc`, [req.auth.mentor.id]));
 }));
 async function ownBooking(req) {
   const b = await db.one('select * from anvaya.bookings where id = $1 and mentor_id = $2', [id(req), req.auth.mentor.id]);
@@ -190,14 +190,10 @@ r.post('/bookings/:id/complete', wrap(async (req, res) => {
 }));
 r.post('/bookings/:id/no-show', wrap(async (req, res) => {
   const b = await ownBooking(req);
-  if (b.status !== 'scheduled') throw bad('Only scheduled sessions can be marked as a no-show.');
-  await db.tx(async (t) => {
-    await t.run("update anvaya.bookings set status = 'no_show' where id = $1", [b.id]);
-    await markAttendance(t, { bookingId: b.id, marks: [{ student_id: b.student_id, status: 'absent' }], userId: req.auth.user.id });
-    await t.run("update anvaya.students set needs_followup = true, followup_reason = 'Missed a 1:1 session' where id = $1", [b.student_id]);
-  });
+  await require('../lib/sessions').markOutcome(b.id, req.auth.user, { outcome: 'student_no_show', reason: v.str(req.body?.reason, { max: 500 }) });
   res.json({ ok: true });
 }));
+
 
 r.get('/students', wrap(async (req, res) => {
   res.json(await db.all(`select ${studentPublicCols},

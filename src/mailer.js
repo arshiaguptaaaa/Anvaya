@@ -53,6 +53,14 @@ ${ctaUrl ? `<tr><td style="padding:20px 40px 8px;">
 const em = (s) => `<em style="color:#e8c97a;">${s}</em>`;
 const strong = (s) => `<strong style="color:#f4ede0;">${s}</strong>`;
 
+const POLICY_TEXT = 'Rescheduling and cancellation: you can reschedule or cancel online up to 2 hours before the start. Inside 2 hours, message the Anvaya team for an exception. No-show policy: if you miss a confirmed session without notice, the host may record a no-show after the start, which pauses new bookings until the Anvaya team reviews it. You can dispute it from your dashboard.';
+const POLICY_HTML = `<strong style="color:#d9cdb8;">Rescheduling:</strong> reschedule or cancel online up to 2 hours before the start; inside 2 hours, message the Anvaya team for an exception.<br><strong style="color:#d9cdb8;">No-show policy:</strong> if you miss a confirmed session without notice, the host may record a no-show, which pauses new bookings until it's reviewed. You can dispute it from your dashboard.`;
+const sessionRows = (d) => `<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;color:#d9cdb8;">
+  <tr><td style="padding:2px 14px 2px 0;color:#7a6e5e;">Date</td><td>${esc(ist(d.startsAt, { dateStyle: 'full' }))}</td></tr>
+  <tr><td style="padding:2px 14px 2px 0;color:#7a6e5e;">Time</td><td>${esc(new Date(d.startsAt).toLocaleString('en-IN', { timeStyle: 'short', timeZone: 'Asia/Kolkata' }))} IST (Asia/Kolkata, GMT+5:30)</td></tr>
+  <tr><td style="padding:2px 14px 2px 0;color:#7a6e5e;">Duration</td><td>${esc(d.duration)} minutes</td></tr>
+  <tr><td style="padding:2px 14px 2px 0;color:#7a6e5e;">Mentor</td><td>${esc(d.mentorName)}</td></tr></table>`;
+
 /** Template name → { subject, html, text }. Data is untrusted and always escaped. */
 const templates = {
   mentor_invite: (d) => ({
@@ -123,15 +131,93 @@ const templates = {
     text: `Payment received for ${d.item}.${d.validTill ? ` Access until ${ist(d.validTill, { dateStyle: 'medium' })}.` : ''} ${d.setupUrl ? `Set up your account: ${d.setupUrl}` : `Open your dashboard: ${d.dashboardUrl}`}\n`,
   }),
   session_changed: (d) => ({
-    subject: d.cancelled ? `Cancelled: ${d.title}` : `Moved: ${d.title} → ${ist(d.startsAt)}`,
+    subject: d.cancelled ? `Cancelled: ${d.title} · ${ist(d.previousAt)}` : `Rescheduled: ${d.title} → ${ist(d.startsAt)}`,
     html: layout({
-      heading: d.cancelled ? `Session ${em('cancelled')}` : `Session ${em('moved')}`,
+      heading: d.cancelled ? `Session ${em('cancelled')}` : `Session ${em('rescheduled')}`,
       bodyHtml: d.cancelled
-        ? `<p style="margin:0;">${strong(esc(d.title))} on ${esc(ist(d.previousAt))} has been cancelled.${d.reason ? ` ${esc(d.reason)}` : ''}</p>`
-        : `<p style="margin:0;">${strong(esc(d.title))} now starts ${strong(esc(ist(d.startsAt)))} (was ${esc(ist(d.previousAt))}).</p>`,
-      ctaUrl: d.dashboardUrl, ctaLabel: 'Open dashboard',
+        ? `<p style="margin:0;">${strong(esc(d.title))}${d.forHost && d.studentName ? ` with ${esc(d.studentName)}` : ''} on ${esc(ist(d.previousAt))} has been cancelled.${d.reason ? ` ${esc(d.reason)}` : ''}</p>`
+        : `<p style="margin:0 0 12px;">${strong(esc(d.title))}${d.forHost && d.studentName ? ` with ${esc(d.studentName)}` : ''} has moved from ${esc(ist(d.previousAt))} to:</p>${sessionRows(d)}${d.meetLink ? `<p style="margin:12px 0 0;">Google Meet: <a style="color:#c9a84c;" href="${esc(d.meetLink)}">${esc(d.meetLink)}</a>${d.icsUrl ? ` &nbsp;·&nbsp; <a style="color:#c9a84c;" href="${esc(d.icsUrl)}">Updated calendar invite (.ics)</a>` : ''}</p>` : ''}`,
+      ctaUrl: d.dashboardUrl, ctaLabel: 'Open dashboard', footnote: d.cancelled ? undefined : POLICY_HTML,
     }),
-    text: d.cancelled ? `Cancelled: ${d.title} on ${ist(d.previousAt)}.` : `Moved: ${d.title} now starts ${ist(d.startsAt)} (was ${ist(d.previousAt)}).\n`,
+    text: d.cancelled ? `Cancelled: ${d.title} on ${ist(d.previousAt)}. ${d.reason || ''}\n` : `Rescheduled: ${d.title} now ${ist(d.startsAt)} (was ${ist(d.previousAt)}). ${d.meetLink ? `Meet: ${d.meetLink}` : ''}\n`,
+  }),
+  // ── Session lifecycle (times always shown in IST with the timezone) ──
+  session_requested: (d) => ({
+    subject: `Request received: ${d.title} on ${ist(d.startsAt, { dateStyle: 'medium' })}`,
+    html: layout({
+      heading: `Request ${em('received')}`,
+      bodyHtml: `<p style="margin:0 0 12px;">We've received your request for ${strong(esc(d.title))} with ${esc(d.mentorName)}.</p>${sessionRows(d)}
+        <p style="margin:12px 0 0;">${strong('This is not confirmed yet.')} Your preferred slot is held until ${esc(ist(d.holdUntil))} while ${esc(d.mentorName)} reviews it. You'll get a confirmation with the Google Meet link once it's approved.</p>`,
+      ctaUrl: d.dashboardUrl, ctaLabel: 'View request', footnote: POLICY_HTML,
+    }),
+    text: `Request received (not yet confirmed): ${d.title} with ${d.mentorName}, ${ist(d.startsAt)}, ${d.duration} min. Slot held until ${ist(d.holdUntil)} while it is reviewed. ${d.dashboardUrl}\n\n${POLICY_TEXT}\n`,
+  }),
+  session_request_host: (d) => ({
+    subject: `New session request: ${d.studentName} · ${ist(d.startsAt)}`,
+    html: layout({
+      heading: `New ${em('request')}`,
+      bodyHtml: `<p style="margin:0 0 12px;">${strong(esc(d.studentName))} requested ${strong(esc(d.title))}.</p>${sessionRows(d)}<p style="margin:12px 0 0;">The slot is held until ${esc(ist(d.holdUntil))}. Approve, decline or suggest another time.</p>`,
+      ctaUrl: d.reviewUrl, ctaLabel: 'Review request',
+    }),
+    text: `New request from ${d.studentName}: ${d.title}, ${ist(d.startsAt)}, ${d.duration} min. Held until ${ist(d.holdUntil)}. Review: ${d.reviewUrl}\n`,
+  }),
+  session_declined: (d) => ({
+    subject: `Not available: ${d.title} on ${ist(d.startsAt, { dateStyle: 'medium' })}`,
+    html: layout({ heading: `Slot ${em('not available')}`, bodyHtml: `<p style="margin:0 0 12px;">${esc(d.mentorName)} can't take ${strong(esc(d.title))} at ${esc(ist(d.startsAt))}.${d.reason ? ` ${esc(d.reason)}` : ''}</p><p style="margin:0;">The slot has been released. Pick another time, or send us your preferred dates.</p>`,
+      ctaUrl: d.dashboardUrl, ctaLabel: 'Choose another time' }),
+    text: `${d.mentorName} can't take ${d.title} at ${ist(d.startsAt)}. ${d.reason || ''} Choose another time: ${d.dashboardUrl}\n`,
+  }),
+  session_proposed: (d) => ({
+    subject: `New time suggested: ${d.title}`,
+    html: layout({ heading: `A new time is ${em('suggested')}`, bodyHtml: `<p style="margin:0 0 12px;">${esc(d.mentorName)} can't do ${esc(ist(d.previousAt))} and suggests ${strong(esc(ist(d.startsAt)))} for ${strong(esc(d.title))}.</p><p style="margin:0;">Accept it in your dashboard and we'll confirm with a Google Meet link. ${strong('Not confirmed until you accept.')}</p>`,
+      ctaUrl: d.dashboardUrl, ctaLabel: 'Review suggested time' }),
+    text: `${d.mentorName} suggests ${ist(d.startsAt)} instead of ${ist(d.previousAt)} for ${d.title}. Accept in your dashboard: ${d.dashboardUrl}\n`,
+  }),
+  session_payment_needed: (d) => ({
+    subject: `Approved, payment due: ${d.title} on ${ist(d.startsAt, { dateStyle: 'medium' })}`,
+    html: layout({ heading: `Approved, ${em('complete payment')}`, bodyHtml: `<p style="margin:0 0 12px;">${esc(d.mentorName)} approved ${strong(esc(d.title))}.</p>${sessionRows(d)}<p style="margin:12px 0 0;">Pay ${strong(esc(d.amount))} by ${esc(ist(d.payBy))} to confirm. You'll receive the Google Meet link after payment.</p>`,
+      ctaUrl: d.dashboardUrl, ctaLabel: 'Pay and confirm', footnote: POLICY_HTML }),
+    text: `Approved: ${d.title}, ${ist(d.startsAt)}. Pay ${d.amount} by ${ist(d.payBy)} to confirm: ${d.dashboardUrl}\n`,
+  }),
+  session_confirmed: (d) => ({
+    subject: `Confirmed: ${d.title} · ${ist(d.startsAt)}`,
+    html: layout({
+      heading: `Your session is ${em('confirmed')}`,
+      bodyHtml: `<p style="margin:0 0 12px;">${d.forHost ? `${strong(esc(d.studentName))} · ` : ''}${strong(esc(d.title))} with ${esc(d.mentorName)}</p>${sessionRows(d)}
+        <p style="margin:16px 0 0;"><a href="${esc(d.meetLink)}" style="display:inline-block;background:#c9a84c;color:#08111f;font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:700;padding:14px 26px;border-radius:4px;text-decoration:none;">Join Google Meet</a></p>
+        <p style="margin:10px 0 0;font-size:13px;color:#d9cdb8;">${esc(d.meetLink)}</p>
+        <p style="margin:16px 0 0;font-size:13px;"><a style="color:#c9a84c;" href="${esc(d.gcalUrl)}">Add to Google Calendar</a> &nbsp;·&nbsp; <a style="color:#c9a84c;" href="${esc(d.icsUrl)}">Download calendar invite (.ics)</a></p>
+        ${d.forHost ? '' : `<p style="margin:10px 0 0;font-size:13px;"><a style="color:#c9a84c;" href="${esc(d.rescheduleUrl)}">Reschedule</a> &nbsp;·&nbsp; <a style="color:#c9a84c;" href="${esc(d.cancelUrl)}">Cancel</a></p>`}`,
+      footnote: POLICY_HTML,
+    }),
+    text: `Confirmed: ${d.title} with ${d.mentorName}\n${ist(d.startsAt)} (Asia/Kolkata), ${d.duration} min\nJoin Google Meet: ${d.meetLink}\nAdd to Google Calendar: ${d.gcalUrl}\nCalendar invite (.ics): ${d.icsUrl}\n${d.forHost ? '' : `Reschedule: ${d.rescheduleUrl}\nCancel: ${d.cancelUrl}\n`}\n${POLICY_TEXT}\n`,
+  }),
+  request_expired: (d) => ({
+    subject: `Request expired: ${d.title}`,
+    html: layout({ heading: `Request ${em('expired')}`, bodyHtml: `<p style="margin:0;">Your request for ${strong(esc(d.title))} at ${esc(ist(d.startsAt))} wasn't approved in time, so the slot has been released. Please choose another time.</p>`, ctaUrl: d.dashboardUrl, ctaLabel: 'Choose another time' }),
+    text: `Your request for ${d.title} at ${ist(d.startsAt)} expired and the slot was released. Choose another time: ${d.dashboardUrl}\n`,
+  }),
+  no_show_student: (d) => ({
+    subject: `Missed session: ${d.title} · ${ist(d.startsAt, { dateStyle: 'medium' })}`,
+    html: layout({
+      heading: `We missed you at your ${em('session')}`,
+      bodyHtml: `<p style="margin:0 0 12px;">${esc(d.mentorName)} recorded that you didn't join ${strong(esc(d.title))}.</p>${sessionRows(d)}
+        <p style="margin:12px 0 0;">Under Anvaya's no-show policy, ${strong('new bookings and session requests are paused')} on your account until this is reviewed. Your account, purchased materials and any sessions already confirmed are not affected.</p>
+        <p style="margin:12px 0 0;">If this isn't right (for example, you joined but couldn't get in), tell us and we'll review it.</p>`,
+      ctaUrl: d.disputeUrl, ctaLabel: 'Dispute this',
+    }),
+    text: `${d.mentorName} recorded that you didn't join ${d.title} at ${ist(d.startsAt)}. New bookings are paused until this is reviewed. Your account, materials and confirmed sessions are unaffected. Dispute it: ${d.disputeUrl}\n`,
+  }),
+  no_show_admin: (d) => ({
+    subject: `No-show recorded: ${d.studentName} · ${d.title}`,
+    html: layout({ heading: `No-show ${em('recorded')}`, bodyHtml: `<p style="margin:0 0 12px;">${strong(esc(d.markedBy))} marked ${strong(esc(d.studentName))} as a no-show for ${esc(d.title)} at ${esc(ist(d.startsAt))}.</p><p style="margin:0 0 12px;">Reason: ${esc(d.reason)}</p><p style="margin:0;">Their new bookings are blocked. ${d.upcoming ? `${d.upcoming} upcoming booking(s) are flagged for your review.` : ''}</p>`,
+      ctaUrl: d.adminUrl, ctaLabel: 'Review in admin' }),
+    text: `${d.markedBy} marked ${d.studentName} as a no-show for ${d.title} at ${ist(d.startsAt)}. Reason: ${d.reason}. Review: ${d.adminUrl}\n`,
+  }),
+  booking_restored: (d) => ({
+    subject: 'Your Anvaya booking access is restored',
+    html: layout({ heading: `Booking access ${em('restored')}`, bodyHtml: `<p style="margin:0;">We've reviewed the missed-session record for ${esc(d.title)} on ${esc(ist(d.startsAt, { dateStyle: 'medium' }))} and reversed it. You can book and request sessions again.</p>`, ctaUrl: d.dashboardUrl, ctaLabel: 'Book a session' }),
+    text: `We reversed the missed-session record for ${d.title}. You can book sessions again: ${d.dashboardUrl}\n`,
   }),
   session_reminder: (d) => ({
     subject: `Reminder: ${d.title} — ${ist(d.startsAt)}`,
@@ -167,22 +253,23 @@ const templates = {
   }),
 };
 
-async function send({ to, subject, html, text }) {
+async function send({ to, subject, html, text, attachments }) {
   if (mode === 'resend') {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: FROM, to: [to], subject, html, text, ...(REPLY_TO ? { reply_to: REPLY_TO } : {}) }),
+      body: JSON.stringify({ from: FROM, to: [to], subject, html, text, ...(REPLY_TO ? { reply_to: REPLY_TO } : {}),
+        ...(attachments?.length ? { attachments: attachments.map((x) => ({ filename: x.filename, content: Buffer.from(x.content).toString('base64'), content_type: x.contentType })) } : {}) }),
     });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(`Email provider rejected the message: ${body.message || r.status}`);
     return { mode, id: body.id };
   }
   if (mode === 'smtp') {
-    const info = await transport.sendMail({ from: FROM, to, subject, html, text, ...(REPLY_TO ? { replyTo: REPLY_TO } : {}) });
+    const info = await transport.sendMail({ from: FROM, to, subject, html, text, ...(REPLY_TO ? { replyTo: REPLY_TO } : {}), ...(attachments?.length ? { attachments } : {}) });
     return { mode, id: info.messageId };
   }
-  if (mode === 'memory') { sent.push({ from: FROM, to, subject, html, text, sentAt: new Date().toISOString() }); return { mode }; }
+  if (mode === 'memory') { sent.push({ from: FROM, to, subject, html, text, attachments: attachments || [], sentAt: new Date().toISOString() }); return { mode, id: `mem_${sent.length}` }; }
   throw new Error('No email provider is configured (set RESEND_API_KEY and MAIL_FROM on the server).');
 }
 
@@ -223,4 +310,4 @@ async function resendSetupDomain(name, region = 'ap-northeast-1') {
   return resendDomains();
 }
 
-module.exports = { send, render, mailMode: () => mode, from: () => FROM, sent, resendDomains, resendSetupDomain, ist, inr, esc };
+module.exports = { POLICY_TEXT, send, render, mailMode: () => mode, from: () => FROM, sent, resendDomains, resendSetupDomain, ist, inr, esc };

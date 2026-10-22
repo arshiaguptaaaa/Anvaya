@@ -63,6 +63,11 @@ r.put('/settings', adminOnly, wrap(async (req, res) => {
   const body = req.body || {};
   for (const [k, val] of Object.entries(body)) {
     if (!(k in settings.DEFAULTS)) throw bad(`Unknown setting ${k}.`);
+    if (k === 'calendar_host_user_id') {
+      const uid = val === '' || val == null ? null : Number(val);
+      if (uid !== null && !await db.one("select 1 from anvaya.users where id = $1 and role in ('admin','ops') and disabled_at is null", [uid])) throw bad('Choose an active admin or ops user.');
+      await settings.set(k, uid, req.auth.user.id); continue;
+    }
     if (k === 'renewal_reminder_days') {
       if (!Array.isArray(val) || !val.every((x) => Number.isInteger(x) && x >= 0 && x <= 60)) throw bad('Renewal reminder days must be a list of whole numbers.');
     } else if (!Number.isInteger(Number(val)) || Number(val) < 0) throw bad(`${k} must be a whole number.`);

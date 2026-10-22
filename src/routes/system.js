@@ -16,6 +16,26 @@ r.post('/webhooks/razorpay', express.raw({ type: '*/*', limit: '1mb' }), wrap(as
 }));
 
 /** Vercel Cron sends `Authorization: Bearer $CRON_SECRET`. */
+// Resend delivery events (Svix-signed). Updates the email log to delivered / bounced / complained.
+r.post('/webhooks/resend', express.raw({ type: '*/*', limit: '1mb' }), wrap(async (req, res) => {
+  const secret = process.env.RESEND_WEBHOOK_SECRET || '';
+  if (!secret) return res.status(503).json({ error: 'not configured' });
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
+  const id = req.get('svix-id') || '', ts = req.get('svix-timestamp') || '', sigs = req.get('svix-signature') || '';
+  if (!id || !ts || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return res.status(401).json({ error: 'stale' });
+  const key = Buffer.from(secret.replace(/^whsec_/, ''), 'base64');
+  const expected = crypto.createHmac('sha256', key).update(`${id}.${ts}.${raw}`).digest('base64');
+  const ok = sigs.split(' ').some((x) => { const v = x.split(',')[1] || ''; return v.length === expected.length && crypto.timingSafeEqual(Buffer.from(v), Buffer.from(expected)); });
+  if (!ok) return res.status(401).json({ error: 'invalid signature' });
+  let ev; try { ev = JSON.parse(raw); } catch { return res.status(400).json({ error: 'bad json' }); }
+  const status = { 'email.delivered': 'delivered', 'email.bounced': 'bounced', 'email.complained': 'complained' }[ev.type];
+  const emailId = ev.data?.email_id;
+  if (status && emailId) {
+    await require('../db').run('update anvaya.email_log set status = $2, error = $3, updated_at = now() where provider_id = $1', [emailId, status, status === 'bounced' ? String(ev.data?.bounce?.message || 'Bounced').slice(0, 300) : '']);
+  }
+  res.json({ ok: true });
+}));
+
 r.get('/cron/run', wrap(async (req, res) => {
   const secret = process.env.CRON_SECRET || '';
   const sent = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');

@@ -173,14 +173,9 @@ async function fulfil(t, order, userId) {
 }
 
 async function notifyBookingConfirmed(bookingId) {
-  const b = await db.one(`select b.*, s.email, s.name as student_name, m.name as mentor_name from anvaya.bookings b
-    join anvaya.students s on s.id = b.student_id left join anvaya.mentors m on m.id = b.mentor_id where b.id = $1`, [bookingId]);
-  if (!b?.email) return;
-  await sendEmail(b.email, 'booking_confirmed', {
-    service: b.service || 'Mentor session', mentorName: b.mentor_name || 'your mentor', startsAt: b.scheduled_at, duration: b.duration,
-    meetLink: b.meeting_link, dashboardUrl: `${BASE_URL()}/student#sessions`,
-  }, { immediate: false, dedupeKey: `booking-confirmed:${b.id}` });
-  jobs.kick();
+  // Confirmation goes out only once Google Calendar returns a real Meet link (see sessions.scheduleSync).
+  await db.run("update anvaya.bookings set calendar_status = 'pending', calendar_error = '' where id = $1 and status = 'scheduled'", [bookingId]);
+  await require('./sessions').scheduleSync(bookingId, 'confirm');
 }
 
 async function markFailed(orderId, reason = 'Payment failed') {

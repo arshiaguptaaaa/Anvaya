@@ -4,6 +4,7 @@
 // mentor + time range for live statuses); creation also runs in a transaction that releases expired
 // holds first and re-validates the slot against the mentor's availability.
 const db = require('../db');
+const gcal = require('./gcal');
 const settings = require('./settings');
 const subs = require('./subscriptions');
 const { HttpError } = require('./http');
@@ -13,13 +14,14 @@ const LIVE = "('pending_payment','requested','scheduled')";
 
 /** Releases payment holds that expired (slot becomes free again). */
 async function releaseExpiredHolds(q = db, mentorId = null) {
-  return q.run(`update anvaya.bookings set status = 'cancelled', cancelled_at = now(), cancel_reason = 'Payment hold expired'
-    where status = 'pending_payment' and hold_expires_at < now() ${mentorId ? 'and mentor_id = $1' : ''}`, mentorId ? [mentorId] : []);
+  return q.run(`update anvaya.bookings set status = 'cancelled', cancelled_at = now(),
+      cancel_reason = case status when 'requested' then 'Request expired before approval' else 'Payment hold expired' end
+    where status in ('pending_payment','requested') and hold_expires_at is not null and hold_expires_at < now() ${mentorId ? 'and mentor_id = $1' : ''}`, mentorId ? [mentorId] : []);
 }
 
 /** Bookable slot start times (ISO) for a mentor over the booking window, in IST availability terms. */
 async function slots(mentorId, { days, q = db, durationMin = null, excludeBookingId = null } = {}) {
-  const m = await q.one("select id, session_duration, buffer_minutes, status from anvaya.mentors where id = $1", [mentorId]);
+  const m = await q.one("select id, user_id, session_duration, buffer_minutes, status from anvaya.mentors where id = $1", [mentorId]);
   if (!m || m.status !== 'active') return [];
   const [avail, cfg] = await Promise.all([
     q.all('select weekday, start_time, end_time from anvaya.availability where mentor_id = $1', [mentorId]),
@@ -29,11 +31,19 @@ async function slots(mentorId, { days, q = db, durationMin = null, excludeBookin
   const notice = Number(cfg.booking_min_notice_hours) * 3600e3;
   const now = Date.now();
   const busy = await q.all(`select scheduled_at as s, ends_at as e from anvaya.bookings where mentor_id = $1 and status in ${LIVE}
-      and (status <> 'pending_payment' or hold_expires_at > now()) and ends_at > now() and id <> coalesce($2::bigint, -1)
+      and (status = 'scheduled' or hold_expires_at is null or hold_expires_at > now()) and ends_at > now() and id <> coalesce($2::bigint, -1)
     union all select starts_at, ends_at from anvaya.live_sessions where mentor_id = $1 and status = 'scheduled' and ends_at > now()`, [mentorId, excludeBookingId]);
   // The mentor's buffer keeps a gap before and after every existing session.
   const buf = (m.buffer_minutes || 0) * 60e3;
   const busyR = busy.map((b) => [new Date(b.s).getTime() - buf, new Date(b.e).getTime() + buf]);
+  // Busy times from the mentor's selected Google calendars (times only, never event details).
+  const conn = m.user_id && await gcal.connectionFor(m.user_id, q).catch(() => null);
+  if (conn) {
+    try { for (const [s, e] of await gcal.busy(conn, now, now + (Number(days || cfg.booking_window_days) + 1) * 86400e3)) busyR.push([s - buf, e + buf]); }
+    catch (e) { console.error('[slots] Google busy unavailable for mentor', mentorId, e.message); }
+  }
+  // Date overrides: whole-day or partial blocks, and extra open hours on specific dates (IST dates).
+  const overrides = await q.all("select to_char(day, 'YYYY-MM-DD') as day, start_time, end_time, kind from anvaya.availability_overrides where mentor_id = $1 and day >= (now() at time zone 'Asia/Kolkata')::date - 1", [mentorId]);
   const dur = (durationMin || m.session_duration) * 60e3;
   const step = dur + buf; // back-to-back slots, separated by the mentor's buffer
   const out = [];
@@ -41,13 +51,20 @@ async function slots(mentorId, { days, q = db, durationMin = null, excludeBookin
   for (let d = 0; d <= windowDays; d++) {
     const dayStartUtc = Date.UTC(todayIst.getUTCFullYear(), todayIst.getUTCMonth(), todayIst.getUTCDate() + d) - IST_MS;
     const weekday = new Date(dayStartUtc + IST_MS).getUTCDay();
-    for (const a of avail.filter((x) => x.weekday === weekday)) {
+    const dayKey = new Date(dayStartUtc + IST_MS).toISOString().slice(0, 10);
+    const todays = overrides.filter((o) => o.day === dayKey);
+    if (todays.some((o) => o.kind === 'blocked' && !o.start_time)) continue; // whole day blocked
+    const at = (hm) => { const [h, mi] = hm.split(':').map(Number); return dayStartUtc + (h * 60 + mi) * 60e3; };
+    const dayBlocks = todays.filter((o) => o.kind === 'blocked' && o.start_time).map((o) => [at(o.start_time), at(o.end_time)]);
+    const windows = [...avail.filter((x) => x.weekday === weekday), ...todays.filter((o) => o.kind === 'open' && o.start_time)];
+    for (const a of windows) {
       const [sh, sm] = a.start_time.split(':').map(Number);
       const [eh, em] = a.end_time.split(':').map(Number);
       const winEnd = dayStartUtc + (eh * 60 + em) * 60e3;
       for (let t = dayStartUtc + (sh * 60 + sm) * 60e3; t + dur <= winEnd; t += step) {
         if (t < now + notice) continue;
         if (busyR.some(([s, e]) => t < e && t + dur > s)) continue;
+        if (dayBlocks.some(([s, e]) => t < e && t + dur > s)) continue;
         out.push(new Date(t).toISOString());
       }
     }
@@ -61,10 +78,12 @@ function isSlot(list, iso) { return list.includes(new Date(iso).toISOString()); 
  * Creates a booking atomically. kind: 'paid_session' | 'checkup'.
  * Paid sessions start as 'pending_payment' (Razorpay hold) or 'requested' (manual payment), check-ups as 'scheduled'.
  */
-async function create({ studentId, mentorId, startsAt, kind, service, serviceId = null, intakeAnswers = {}, userId, order = null, paymentMode = 'razorpay', allowOutsideAvailability = false }) {
+async function create({ studentId, mentorId, startsAt, kind, service, serviceId = null, intakeAnswers = {}, userId, order = null, paymentMode = 'razorpay', allowOutsideAvailability = false, asRequest = false }) {
+  const sessions = require('./sessions');
   try {
     return await db.tx(async (t) => {
       await t.one('select id from anvaya.students where id = $1 for update', [studentId]); // serialize this student's entitlement checks
+      await sessions.assertCanBook(studentId, t); // a confirmed no-show blocks every new booking or request
       await releaseExpiredHolds(t, mentorId);
       const m = await t.one('select * from anvaya.mentors where id = $1', [mentorId]);
       if (!m || m.status !== 'active') throw new HttpError(400, 'This mentor is not available for booking.');
@@ -93,9 +112,11 @@ async function create({ studentId, mentorId, startsAt, kind, service, serviceId 
         status = paymentMode === 'razorpay' ? 'pending_payment' : 'requested';
         if (status === 'pending_payment') hold = new Date(Date.now() + Number(await settings.get('booking_hold_minutes', t)) * 60e3);
       }
+      // Student-initiated: always a request awaiting the host's approval, with the slot held until it expires.
+      if (asRequest) { status = 'requested'; hold = await sessions.holdUntil(startsAt, t); }
       const b = await t.one(`insert into anvaya.bookings (student_id, mentor_id, kind, service, scheduled_at, duration, status, price_paise, mentor_fee_paise,
-          meeting_link, subscription_id, order_id, hold_expires_at, created_by, service_id, intake_answers)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning *`,
+          meeting_link, subscription_id, order_id, hold_expires_at, created_by, service_id, intake_answers, requested_at)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, case when $7 = 'requested' then now() end) returning *`,
       [studentId, mentorId, kind, svc?.title || service || (kind === 'checkup' ? 'Check-up call' : 'Private mentor session'), new Date(startsAt).toISOString(), duration,
         status, price, fee, m.meeting_link, subscriptionId, order?.id ?? null, hold, userId, svc?.id ?? null, JSON.stringify(intakeAnswers || {})]);
       await t.run('update anvaya.students set mentor_id = coalesce(mentor_id, $1) where id = $2', [mentorId, studentId]);
@@ -132,8 +153,9 @@ async function reschedule({ bookingId, startsAt, byUserId, studentId = null, all
       const iso = new Date(startsAt).toISOString();
       if (iso === new Date(b.scheduled_at).toISOString()) throw new HttpError(400, 'That is already the session time.');
       if (studentId) {
-        const notice = Number(await settings.get('booking_min_notice_hours', t)) * 3600e3;
-        if (new Date(b.scheduled_at).getTime() - Date.now() < notice) throw new HttpError(400, 'It’s too close to the session to move it online. Please message the Anvaya team.');
+        const cutoff = Number(await settings.get('reschedule_cutoff_hours', t)) || 2;
+        if (new Date(b.scheduled_at).getTime() - Date.now() < cutoff * 3600e3) throw new HttpError(400, `It’s within ${cutoff} hours of the session, so it can’t be rescheduled online. Raise a support request and the Anvaya team can make an exception.`);
+        await require('./sessions').assertCanBook(b.student_id, t);
       }
       if (!allowOutsideAvailability && !isSlot(await slots(b.mentor_id, { q: t, durationMin: b.duration, excludeBookingId: b.id }), iso)) {
         throw new HttpError(409, 'That time is no longer available. Please pick another slot.');

@@ -114,6 +114,7 @@ app.use('/api', require('./routes/cases'));
 const admin = express.Router();
 for (const m of ['core', 'crm', 'mentors', 'commerce', 'learning', 'services', 'workspace']) admin.use(require(`./routes/admin/${m}`));
 app.use('/api/admin', admin);
+app.use('/api/calendar', require('./routes/calendar'));
 app.use('/api/mentor', require('./routes/mentor'));
 app.use('/api/student', require('./routes/student'));
 storage.memoryRoutes(app, express);

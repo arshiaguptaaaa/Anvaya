@@ -9,7 +9,7 @@
   const refresh = () => render(current);
 
   async function sessionModal(b) {
-    const done = b.status !== 'scheduled';
+    const done = b.status !== 'scheduled' || new Date(b.scheduled_at) > Date.now();
     const ui = modal(`<div class="eyebrow">${esc(label(b.kind))}</div><div class="row-between mb-2"><h2 class="h2">${esc(b.student_name)}</h2>${statusPill(b.status)}</div>
       <div class="kv-inline mb-3"><span>When <strong>${esc(dt(b.scheduled_at))} IST</strong></span><span>Length <strong>${b.duration} min</strong></span>
         <span>${b.kind === 'checkup' ? 'Check-up fee' : 'Your fee'} <strong>${inr(b.mentor_fee_paise)}</strong></span>${b.meeting_link ? `<span><a href="${esc(b.meeting_link)}" target="_blank" rel="noopener noreferrer">Join on Meet</a></span>` : ''}</div>
@@ -28,8 +28,9 @@
       try { await api(`/api/mentor/bookings/${b.id}`, { method: 'PATCH', body: { notes_visibility: form.notes_visibility.value } }); await api(`/api/mentor/bookings/${b.id}/complete`, { method: 'POST', body: { session_notes: form.session_notes.value } }); toast('Completed'); ui.close(); refresh(); } catch (e) { toast(e.message, true); }
     });
     ui.el.querySelector('[data-noshow]')?.addEventListener('click', async () => {
-      if (!await confirmBox('Mark as no-show?', 'The student is flagged for follow-up.', { danger: true, ok: 'No-show' })) return;
-      try { await api(`/api/mentor/bookings/${b.id}/no-show`, { method: 'POST', body: {} }); toast('Marked'); ui.close(); refresh(); } catch (e) { toast(e.message, true); }
+      const reason = prompt('What happened? (kept internal; required)');
+      if (!reason || !reason.trim()) return;
+      try { await api(`/api/calendar/bookings/${b.id}/outcome`, { method: 'POST', body: { outcome: 'student_no_show', reason } }); toast('No-show recorded'); ui.close(); refresh(); } catch (e) { toast(e.message, true); }
     });
   }
   async function attendanceModal(l) {
@@ -54,9 +55,9 @@
 
   async function sessions() {
     const [rows, lives] = await Promise.all([api('/api/mentor/bookings'), api('/api/mentor/live-sessions')]);
-    main.innerHTML = pageHead('Delivery', 'Your <em>sessions</em>', 'Add notes after each session, mark attendance and completion.');
+    main.innerHTML = pageHead('Delivery', 'Your <em>sessions</em>', 'Add notes after each session, mark attendance and completion. Approve requests and record outcomes on the <a href="#calendar">Calendar</a>.');
     const now = Date.now();
-    const bCard = tableCard({ title: '1:1 sessions', rows, filter: { key: 'status', options: [['scheduled', 'Scheduled'], ['completed', 'Completed'], ['no_show', 'No-show'], ['cancelled', 'Cancelled']] },
+    const bCard = tableCard({ title: '1:1 sessions', rows, filter: { key: 'status', options: [['requested', 'Requested'], ['pending_payment', 'Awaiting payment'], ['scheduled', 'Confirmed'], ['completed', 'Completed'], ['no_show', 'No-show'], ['cancelled', 'Cancelled']] },
       columns: [
         { h: 'When (IST)', render: (b) => `<span class="when">${esc(dt(b.scheduled_at))}</span><span class="sub-line">${b.duration} min${b.status === 'scheduled' && new Date(b.scheduled_at) < now ? ' · awaiting completion' : ''}</span>` },
         { h: 'Student', cls: 'strong', render: (b) => `${esc(b.student_name)}<span class="sub-line">${esc(b.service || label(b.kind))}</span>` },
@@ -193,7 +194,8 @@
     }));
   }
 
-  const views = { overview, sessions, students, groups, reviews, earnings, availability, profile, services };
+  const calendar = () => A.planner(main, { staff: false });
+  const views = { overview, sessions, students, groups, reviews, earnings, availability, profile, services, calendar };
   let current = 'overview';
   async function render(tab = current) {
     current = views[tab] ? tab : 'overview';

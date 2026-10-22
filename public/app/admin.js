@@ -325,7 +325,7 @@
   }
   async function calendar() {
     const [lives, bookings] = await Promise.all([api('/api/admin/live-sessions'), get('bookings', '/api/admin/bookings')]);
-    main.innerHTML = pageHead('Delivery', 'Session <em>calendar</em>', 'All times in IST. Live classes and mentor rooms run on Google Meet; 1:1 bookings come from students or are added here.',
+    main.innerHTML = pageHead('Delivery', 'Session <em>list</em>', '<a href="#calendar">← Back to the calendar</a> · All times in IST. Live classes and mentor rooms run on Google Meet; 1:1 bookings come from students or are added here.',
       '<button class="btn btn-ghost" data-book>+ 1:1 booking</button><button class="btn btn-primary" data-new>+ Class / room</button>');
     const now = Date.now();
     const liveCard = tableCard({
@@ -341,7 +341,7 @@
     });
     const bookCard = tableCard({
       title: '1:1 sessions', rows: bookings, search: (b) => `${b.student_name} ${b.mentor_name || ''} ${b.service}`,
-      filter: { key: 'status', options: [['scheduled', 'Scheduled'], ['requested', 'Awaiting payment'], ['completed', 'Completed'], ['cancelled', 'Cancelled'], ['no_show', 'No-show']] },
+      filter: { key: 'status', options: [['requested', 'Requested'], ['pending_payment', 'Awaiting payment'], ['scheduled', 'Confirmed'], ['completed', 'Completed'], ['cancelled', 'Cancelled'], ['no_show', 'No-show']] },
       columns: [
         { h: 'When (IST)', render: (b) => `<span class="when">${esc(dt(b.scheduled_at))}</span><span class="sub-line">${b.duration} min</span>` },
         { h: 'Student', cls: 'strong', render: (b) => `${esc(b.student_name)}<span class="sub-line">${esc(b.service || label(b.kind))}</span>` },
@@ -659,7 +659,7 @@
     });
   }
   async function settingsPage() {
-    const s = await api('/api/admin/settings');
+    const [s, team] = await Promise.all([api('/api/admin/settings'), api('/api/admin/team')]);
     main.innerHTML = pageHead('Admin', 'Settings', 'Configurable defaults. Nothing here is hard-coded elsewhere.') + `<div class="card card-pad reveal"><form novalidate><div class="form-error" hidden></div><div class="form-grid">
       ${A.fieldHtml({ name: 'group_capacity_default', label: 'Default group capacity', type: 'number', min: 1 }, s.group_capacity_default)}
       ${A.fieldHtml({ name: 'subscription_grace_days', label: 'Grace period after paid-through (days)', type: 'number', min: 0 }, s.subscription_grace_days)}
@@ -667,6 +667,11 @@
       ${A.fieldHtml({ name: 'booking_hold_minutes', label: 'Payment hold on a slot (minutes)', type: 'number', min: 1 }, s.booking_hold_minutes)}
       ${A.fieldHtml({ name: 'booking_min_notice_hours', label: 'Minimum booking notice (hours)', type: 'number', min: 0 }, s.booking_min_notice_hours)}
       ${A.fieldHtml({ name: 'booking_window_days', label: 'How far ahead students can book (days)', type: 'number', min: 1 }, s.booking_window_days)}
+      ${A.fieldHtml({ name: 'booking_request_hold_hours', label: 'Hold a requested slot while awaiting approval (hours)', type: 'number', min: 1 }, s.booking_request_hold_hours)}
+      ${A.fieldHtml({ name: 'booking_payment_hours', label: 'Time to pay after approval (hours)', type: 'number', min: 1 }, s.booking_payment_hours)}
+      ${A.fieldHtml({ name: 'reschedule_cutoff_hours', label: 'Self-service reschedule/cancel until (hours before start)', type: 'number', min: 0 }, s.reschedule_cutoff_hours)}
+      ${A.fieldHtml({ name: 'noshow_grace_minutes', label: 'No-show can be confirmed after (minutes past start)', type: 'number', min: 0 }, s.noshow_grace_minutes)}
+      ${A.fieldHtml({ name: 'calendar_host_user_id', label: 'Fallback Google Calendar host', type: 'select', options: [['', 'None — only connected mentors'], ...team.map((u) => [u.id, `${u.name || u.email} (${u.role})`])], hint: 'Hosts the event + Meet link when the mentor hasn’t connected Google Calendar. That person must connect it on the Calendar page.' }, s.calendar_host_user_id ?? '')}
       ${A.fieldHtml({ name: 'commission_percent', label: 'Commission on private sessions (%)', type: 'number', min: 0, hint: 'Currently 0 — the full fee is owed to the mentor.', disabled: true }, s.commission_percent)}
       </div><button class="btn btn-primary" type="submit">Save settings</button></form></div>`;
     onSubmit(main.querySelector('form'), async (dta) => {
@@ -703,7 +708,7 @@
   const ctx = () => ({ main, refresh, leadDetail, leadFields, studentFields, studentDetail, isAdmin });
   const views = { today: () => O.today(ctx()), overview, followups, leads: () => O.table(ctx(), 'leads'), students: () => O.table(ctx(), 'students'), support: () => O.support(ctx()),
     'mentor-services': () => O.serviceApprovals(ctx()), 'leads-classic': leads, 'students-classic': students,
-    mentors, groups, calendar, syllabus, services, subscriptions, catalog, payments, payables, cohorts, reports, team, settings: settingsPage, system };
+    mentors, groups, calendar: async () => A.planner(main, { staff: true, isAdmin, settings: await api('/api/admin/settings') }), 'calendar-list': calendar, syllabus, services, subscriptions, catalog, payments, payables, cohorts, reports, team, settings: settingsPage, system };
   let current = 'today';
   async function render(tab = current) {
     // Deep links: #student-123 (unified record), #queue-followups_due (a saved queue)

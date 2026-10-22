@@ -321,6 +321,26 @@ r.patch('/bookings/:id', staff, wrap(async (req, res) => {
   };
   if (isAdmin(req)) { spec.price_paise = (x) => v.paise(x, { label: 'Price' }) ?? 0; spec.mentor_fee_paise = (x) => v.paise(x, { label: 'Mentor fee' }) ?? 0; }
   const f = await fields(spec)(req.body || {}, { partial: true });
+  const sessions = require('../../lib/sessions');
+  // Lifecycle changes go through the session engine (calendar event, emails to both parties, reminders, no-show rules).
+  if (f.status === 'cancelled' && b.status !== 'cancelled') { await sessions.cancel(bid, { by: req.auth.user.id, reason: f.cancel_reason || '' }); return res.json({ ok: true }); }
+  if (f.status === 'no_show' && b.status !== 'no_show') {
+    await sessions.markOutcome(bid, req.auth.user, { outcome: 'student_no_show', reason: v.str(req.body?.reason || req.body?.cancel_reason, { max: 500 }) });
+    return res.json({ ok: true });
+  }
+  if (f.scheduled_at && new Date(f.scheduled_at).getTime() !== new Date(b.scheduled_at).getTime() && ['scheduled', 'requested', 'pending_payment'].includes(b.status)) {
+    await bookingsLib.reschedule({ bookingId: bid, startsAt: f.scheduled_at, byUserId: req.auth.user.id, allowOutsideAvailability: true });
+    delete f.scheduled_at;
+    if (!f.status || f.status === b.status) await sessions.afterReschedule(bid);
+  }
+  if (f.status === 'scheduled' && ['requested', 'pending_payment'].includes(b.status)) {
+    // Staff confirmation (manual/complimentary): confirm now; the confirmation goes out once the Meet link exists.
+    await db.run("update anvaya.bookings set status = 'scheduled', hold_expires_at = null, approved_at = now(), approved_by = $2, calendar_status = 'pending' where id = $1", [bid, req.auth.user.id]);
+    delete f.status;
+    if (Object.keys(f).length) await db.run(...updateSql('bookings', f, bid));
+    await sessions.scheduleSync(bid, 'confirm');
+    return res.json({ ok: true });
+  }
   if (f.status === 'cancelled') f.cancelled_at = new Date().toISOString();
   if (f.status === 'completed' && b.status !== 'completed') f.completed_at = new Date().toISOString();
   const moved = f.scheduled_at && new Date(f.scheduled_at).getTime() !== new Date(b.scheduled_at).getTime();
@@ -340,9 +360,6 @@ r.patch('/bookings/:id', staff, wrap(async (req, res) => {
   } catch (e) {
     if (/bookings_no_overlap|exclusion/.test(e.message)) throw new HttpError(409, 'The mentor already has a session at that time.');
     throw e;
-  }
-  if ((moved || cancelled) && ['scheduled', 'requested'].includes(b.status)) {
-    ops.notifyBookingChange(bid, { previousAt: b.scheduled_at, cancelled, reason: f.cancel_reason || '' }).catch((e) => console.error('[booking-change]', e.message));
   }
   res.json({ ok: true });
 }));
