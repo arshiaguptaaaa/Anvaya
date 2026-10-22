@@ -397,6 +397,8 @@ a.link-btn { text-decoration:none; }
 .gn-d.today { background:var(--gold); color:var(--navy); font-weight:600; }
 .gc-sec { margin-top:16px; }
 .gc-sec-h { font-size:13.5px; color:var(--ivory); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+.gc-sub-row { display:flex; justify-content:space-between; align-items:center; }
+.gc-sub-row .gc-link { font-size:11px; letter-spacing:0; text-transform:none; }
 .gc-sub-h { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:12px 0 6px; }
 .gc-badge { background:var(--gold); color:var(--navy); border-radius:999px; font-size:11px; padding:0 7px; font-weight:600; }
 .gc-badge.bad { background:var(--red); }

@@ -198,7 +198,7 @@
     function layers() {
       $('#gcLayers').innerHTML = LAYERS.map(([k, l, c]) => `<label class="gc-cb"><input type="checkbox" data-layer="${k}"${st.layers[k] ? ' checked' : ''} data-c="${c}"><span>${l}</span></label>`).join('')
         + `<label class="gc-cb"><input type="checkbox" data-layer="cancelled"${st.layers.cancelled ? ' checked' : ''} data-c="#7a6e5e"><span>Show cancelled</span></label>`
-        + (g.connected && g.calendars.length ? `<div class="gc-sub-h">Your Google Calendar</div>${g.calendars.map((c) => `<label class="gc-cb"><input type="checkbox" data-gcal="${esc(c.id)}"${(g.shown || []).includes(c.id) ? ' checked' : ''} data-c="${esc(c.color)}"><span>${esc(c.summary)}</span></label>`).join('')}` : '')
+        + (g.connected && g.calendars.length ? `<div class="gc-sub-h gc-sub-row"><span>Your Google Calendar</span>${g.calendars.length > 1 ? `<button class="gc-link" data-gall="${g.calendars.every((c) => (g.shown || []).includes(c.id)) ? 'none' : 'all'}">${g.calendars.every((c) => (g.shown || []).includes(c.id)) ? 'Clear' : 'Select all'}</button>` : ''}</div>${g.calendars.map((c) => `<label class="gc-cb"><input type="checkbox" data-gcal="${esc(c.id)}"${(g.shown || []).includes(c.id) ? ' checked' : ''} data-c="${esc(c.color)}"><span>${esc(c.summary)}</span></label>`).join('')}` : '')
         + (g.error ? `<p class="gc-err">${esc(g.error)}</p>` : '');
       $('#gcLayers').querySelectorAll('[data-c]').forEach((el) => el.style.setProperty('--c', el.dataset.c));
     }
@@ -229,13 +229,17 @@
       const c = gInfo.connection, cals = gInfo.calendars;
       const ui = modal(`<div class="eyebrow">Google Calendar</div><h2 class="h2 mb-1">Calendar <em>settings</em></h2><p class="small muted mb-2">Connected as ${esc(c.google_email)}.</p>
         <form novalidate><div class="form-error" hidden></div>
-          <div class="section-label">Busy times from these calendars block student bookings</div>
+          <div class="row-between"><div class="section-label">Busy times from these calendars block student bookings</div>${cals.length > 1 ? '<button type="button" class="gc-link" data-busy-all>Select all</button>' : ''}</div>
           ${cals.map((x) => `<label class="check small"><input type="checkbox" name="busy" value="${esc(x.id)}"${c.busy_calendar_ids.includes(x.id) ? ' checked' : ''}> ${esc(x.summary)}</label>`).join('')}
           <div class="section-label mt-2">Add confirmed sessions (with Meet links) to</div>
           <select class="input" name="booking">${cals.filter((x) => x.canWrite !== false).map((x) => `<option value="${esc(x.id)}"${x.id === c.booking_calendar_id ? ' selected' : ''}>${esc(x.summary)}</option>`).join('')}</select>
           <p class="hint">Saving also adds any upcoming confirmed sessions that aren’t in Google yet.</p>
           <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" type="submit">Save</button></div></form>`);
       const f = ui.el.querySelector('form');
+      const allBtn = ui.el.querySelector('[data-busy-all]');
+      const syncAll = () => { if (allBtn) allBtn.textContent = [...f.querySelectorAll('[name=busy]')].every((x) => x.checked) ? 'Clear' : 'Select all'; };
+      allBtn?.addEventListener('click', () => { const on = allBtn.textContent === 'Select all'; f.querySelectorAll('[name=busy]').forEach((x) => { x.checked = on; }); syncAll(); });
+      f.addEventListener('change', syncAll); syncAll();
       onSubmit(f, async () => {
         const r = await api('/api/calendar/google', { method: 'PUT', body: { busy_calendar_ids: [...f.querySelectorAll('[name=busy]:checked')].map((x) => x.value), booking_calendar_id: f.booking.value } });
         ui.close(); toast(r.synced ? `Saved · adding ${r.synced} session(s) to Google` : 'Saved'); google(); load();
@@ -432,6 +436,8 @@
       if (t.closest('[data-block-new]')) return run(blockModal());
       if (t.closest('[data-edit-hours]')) return hoursModal();
       if (t.closest('[data-extra]')) return run(blockModal({ start: 18 * 60, end: 20 * 60 }));
+      const ga = t.closest('[data-gall]');
+      if (ga) { st.gcals = ga.dataset.gall === 'all' ? g.calendars.map((c) => c.id) : [g.calendars.find((c) => c.primary)?.id || g.calendars[0].id]; store.set('gcals', st.gcals); run(load()); return; }
       if (t.closest('[data-gset]')) return googleSettings();
       if (t.closest('[data-gdis]')) {
         run(confirmBox('Disconnect Google Calendar?', 'Your Google events disappear from this view and new confirmations can’t get a Meet link until a host calendar is connected again. Existing events stay in Google.', { danger: true, ok: 'Disconnect' })

@@ -73,7 +73,7 @@ async function connectionFor(userId, q = db) {
 }
 
 async function listCalendars(conn) {
-  if (FAKE()) return [{ id: 'primary', summary: 'Primary (test)', primary: true, canWrite: true, color: '#039be5' }];
+  if (FAKE()) return [{ id: 'primary', summary: 'Primary (test)', primary: true, canWrite: true, color: '#039be5' }, { id: 'team', summary: 'Team (test)', primary: false, canWrite: false, color: '#8e24aa' }];
   const b = await api(conn, 'GET', '/users/me/calendarList?minAccessRole=reader');
   return (b.items || []).map((c) => ({ id: c.id, summary: c.summaryOverride || c.summary, primary: !!c.primary, canWrite: ['owner', 'writer'].includes(c.accessRole), color: c.backgroundColor || '#039be5' }));
 }
@@ -99,7 +99,7 @@ async function listEvents(conn, calendarIds, from, to) {
     start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date, location: e.location || '', link: e.htmlLink || '', busy: e.transparency !== 'transparent' });
   if (FAKE()) return fake.items.filter((e) => calendarIds.includes(e.calendarId || 'primary')).map((e) => norm(e, e.calendarId || 'primary'));
   const out = [];
-  for (const id of calendarIds.slice(0, 10)) {
+  for (const id of calendarIds.slice(0, 30)) {
     const q = new URLSearchParams({ timeMin: new Date(from).toISOString(), timeMax: new Date(to).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250',
       fields: 'items(id,summary,start,end,location,htmlLink,status,transparency,extendedProperties)' });
     const b = await api(conn, 'GET', `/calendars/${encodeURIComponent(id)}/events?${q}`);

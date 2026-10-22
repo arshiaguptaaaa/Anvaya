@@ -81,7 +81,7 @@ r.put('/google', wrap(async (req, res) => {
   if (!conn) throw new HttpError(404, 'Connect Google Calendar first.');
   const cals = await gcal.listCalendars(conn);
   const ids = new Set(cals.map((c) => c.id));
-  const busy = (Array.isArray(req.body?.busy_calendar_ids) ? req.body.busy_calendar_ids : []).map(String).filter((x) => ids.has(x)).slice(0, 20);
+  const busy = (Array.isArray(req.body?.busy_calendar_ids) ? req.body.busy_calendar_ids : []).map(String).filter((x) => ids.has(x)).slice(0, 30);
   const booking = String(req.body?.booking_calendar_id || conn.booking_calendar_id);
   if (!ids.has(booking) || cals.find((c) => c.id === booking)?.canWrite === false) throw bad('Choose a calendar you can add events to.');
   await db.run('update anvaya.calendar_connections set busy_calendar_ids = $2, booking_calendar_id = $3, updated_at = now() where id = $1', [conn.id, busy.length ? busy : ['primary'], booking]);
