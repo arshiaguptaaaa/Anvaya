@@ -73,7 +73,16 @@ const templates = {
     }),
     text: `Hi ${d.name},\n\nYou've been invited to mentor with Anvaya.\nAccept your invitation: ${d.url}\n\nThis link works once and expires on ${ist(d.expiresAt)}.\n`,
   }),
-  student_invite: (d) => ({
+  student_invite: (d) => (d.signup ? {
+    subject: 'Finish creating your Anvaya account',
+    html: layout({
+      heading: `Welcome, ${em(esc(d.name))}`,
+      bodyHtml: '<p style="margin:0 0 12px;">Thanks for signing up. Set a password to finish creating your account. From your dashboard you can book a free chat, browse mentors and plans, and keep track of your sessions.</p><p style="margin:0;">If you didn’t sign up for Anvaya, you can ignore this email.</p>',
+      ctaUrl: d.url, ctaLabel: 'Set my password',
+      footnote: `This link works once and expires on ${strong(esc(ist(d.expiresAt)))}.`,
+    }),
+    text: `Hi ${d.name},\n\nFinish creating your Anvaya account: ${d.url}\nThis link works once and expires on ${ist(d.expiresAt)}.\nIf you didn't sign up, ignore this email.\n`,
+  } : {
     subject: d.isResend ? 'Your new Anvaya sign-up link' : 'Your Anvaya student account is ready',
     html: layout({
       heading: `Welcome, ${em(esc(d.name))}`,

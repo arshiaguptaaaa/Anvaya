@@ -375,10 +375,18 @@ test('Google sign-in: existing accounts keep their role and limits; unknown, unv
     assert.equal((await gs.get('/api/admin/students')).status, 403, 'student stays out of admin');
     assert.equal((await gs.get('/api/mentor/bookings')).status, 403, 'student stays out of mentor');
 
-    assert.equal(err(await viaGoogle(new Client(), 'student', 'stranger@gmail.com')), 'google_no_account', 'no account creation');
+    // Students can sign up with Google (the email is Google-verified); mentors and staff cannot.
+    assert.equal(err(await viaGoogle(new Client(), 'mentor', 'stranger@gmail.com')), 'google_no_account', 'no mentor account creation');
+    assert.equal(err(await viaGoogle(new Client(), 'admin', 'stranger@gmail.com')), 'google_no_account', 'no staff account creation');
+    const newbie = new Client();
+    assert.match((await viaGoogle(newbie, 'student', 'stranger@gmail.com')).text, /url=\/student#intake"/, 'new student signs up with Google');
+    await newbie.refresh();
+    assert.equal((await newbie.get('/api/student/me')).status, 200);
+    assert.equal((await db.one("select role from anvaya.users where email = 'stranger@gmail.com'")).role, 'student');
     const inv = await admin.post('/api/admin/students', { name: 'Invited Only', email: 'invited.only@students.test' });
     await admin.post(`/api/admin/students/${inv.json.id}/invite`);
-    assert.equal(err(await viaGoogle(new Client(), 'student', 'invited.only@students.test')), 'google_no_account', 'must accept the invitation first');
+    assert.match((await viaGoogle(new Client(), 'student', 'invited.only@students.test')).text, /url=\/student/, 'an invited student can finish with Google');
+    assert.equal((await db.one("select count(*)::int n from anvaya.students where email = 'invited.only@students.test'")).n, 1, 'linked, not duplicated');
     assert.equal(err(await viaGoogle(new Client(), 'student', 'rahul@students.test', (c) => ({ ...c, email_verified: false }))), 'google_unverified');
     assert.equal(err(await viaGoogle(new Client(), 'student', 'rahul@students.test', (c) => ({ ...c, aud: 'someone-else' }))), 'google_failed');
     assert.equal(err(await viaGoogle(new Client(), 'student', 'rahul@students.test', (c) => ({ ...c, nonce: 'replayed' }))), 'google_failed');
@@ -1223,6 +1231,43 @@ test('website free chats: visitors pick the host’s open slots, the slot is hel
   assert.match(lastEmailTo('tara@guest.test').text, /couldn't confirm your free chat/);
   assert.ok((await (await pub('/api/public/freechat/slots')).json()).slots.includes(later), 'expired hold released');
   await db.run("update anvaya.settings set value = 'null' where key = 'freechat_mentor_id'");
+});
+
+test('student sign-up: email link sets the password, existing emails reveal nothing, sign-in works', async () => {
+  const anon = new Client();
+  await anon.refresh();
+  assert.equal((await anon.get('/signup')).status, 200);
+  assert.equal((await anon.post('/api/auth/signup', { name: '', email: 'x@y.test' })).status, 400);
+  assert.equal((await anon.post('/api/auth/signup', { name: 'Ana', email: 'not-an-email' })).status, 400);
+  const before = mailer.sent.length;
+  const r = await anon.post('/api/auth/signup', { name: 'Meera Signup', email: 'Meera.Signup@students.test', phone: '+91 98765 11111' });
+  assert.equal(r.status, 201, r.text); assert.match(r.json.message, /Check your inbox/);
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  const mail = lastEmailTo('meera.signup@students.test');
+  assert.match(mail.subject, /Finish creating your Anvaya account/);
+  const u = await db.one("select u.id, u.role, u.password_hash, s.id as sid, s.name from anvaya.users u join anvaya.students s on s.user_id = u.id where u.email = 'meera.signup@students.test'");
+  assert.equal(u.role, 'student'); assert.equal(u.password_hash, null, 'no password until the email link is used');
+  // the same email again (or an existing account's email) gets the same reply and no new account
+  const again = await anon.post('/api/auth/signup', { name: 'Someone Else', email: 'meera.signup@students.test' });
+  assert.equal(again.status, 201); assert.equal(again.json.message, r.json.message);
+  const taken = await anon.post('/api/auth/signup', { name: 'Not Neha', email: 'neha@students.test' });
+  assert.equal(taken.json.message, r.json.message, 'no account enumeration');
+  assert.equal((await db.one("select count(*)::int n from anvaya.users where lower(email) = 'neha@students.test'")).n, 1);
+  assert.ok(mailer.sent.length > before);
+  // finish: set a password with the newest link, then sign in like any student
+  await jobs.processDue({ kinds: ['email.send'], limit: 20 });
+  const tok = tokenFrom(lastEmailTo('meera.signup@students.test'));
+  const acc = await anon.post('/api/invites/accept', { token: tok, password: 'Signup-pass-01', confirm: 'Signup-pass-01' });
+  assert.equal(acc.status, 200, acc.text);
+  const me = new Client();
+  assert.equal((await me.login('meera.signup@students.test', 'Signup-pass-01')).status, 200);
+  assert.equal((await me.get('/api/student/me')).status, 200);
+  // a payment-created student record (same email, no login yet) is linked, not duplicated
+  await db.run("insert into anvaya.students (name, email, status) values ('Paid Before', 'paid.before@students.test', 'active')");
+  const visitor = new Client(); await visitor.refresh();
+  const pb = await visitor.post('/api/auth/signup', { name: 'Paid Before', email: 'paid.before@students.test' });
+  assert.equal(pb.status, 201, pb.text);
+  assert.equal((await db.one("select count(*)::int n from anvaya.students where email = 'paid.before@students.test' and user_id is not null")).n, 1);
 });
 
 test('availability: weekly hours, blocked dates and Google busy times shape the bookable slots; students never see private details', async () => {

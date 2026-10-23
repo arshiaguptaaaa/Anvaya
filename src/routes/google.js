@@ -76,6 +76,24 @@ async function verifyIdToken(idToken, nonce) {
 
 const back = (res, area, code) => res.redirect(303, `${AREAS[area] || AREAS.student}?error=${code}`);
 
+/** Creates (or completes) a student account for a Google-verified email. The random password is never shown;
+    the student signs in with Google, or sets a password later with “Forgot password”. */
+async function signUpStudent(email, name) {
+  return db.tx(async (t) => {
+    let u = await t.one('select * from anvaya.users where lower(email) = $1 for update', [email]);
+    if (!u) u = await t.one("insert into anvaya.users (email, name, role) values ($1,$2,'student') returning *", [email, name.slice(0, 120)]);
+    if (!u.password_hash) u = await t.one('update anvaya.users set password_hash = $2 where id = $1 returning *', [u.id, sec.hashPassword(sec.randomToken(24))]);
+    const linked = await t.one('select id from anvaya.students where user_id = $1', [u.id]);
+    if (!linked) {
+      const st = await t.one('select id from anvaya.students where lower(email) = $1 and user_id is null order by id limit 1', [email]);
+      if (st) await t.run('update anvaya.students set user_id = $1 where id = $2', [u.id, st.id]);
+      else await t.run("insert into anvaya.students (name, email, user_id, status) values ($1,$2,$3,'active')", [name.slice(0, 120), email, u.id]);
+    }
+    await t.run('update anvaya.invitations set revoked_at = now() where user_id = $1 and used_at is null and revoked_at is null', [u.id]);
+    return u;
+  });
+}
+
 r.get('/auth/google/callback', callbackLimiter, wrap(async (req, res) => {
   let saved = null;
   try { saved = JSON.parse(req.cookies[STATE_COOKIE] || 'null'); } catch { /* ignore */ }
@@ -103,8 +121,13 @@ r.get('/auth/google/callback', callbackLimiter, wrap(async (req, res) => {
   }
   const email = String(claims.email || '').trim().toLowerCase();
   if (!email || claims.email_verified !== true) return back(res, area, 'google_unverified');
-  const user = await db.one('select * from anvaya.users where lower(email) = $1', [email]);
-  // Existing, activated accounts only: an invited account must accept its invitation first.
+  let user = await db.one('select * from anvaya.users where lower(email) = $1', [email]);
+  // Students may sign up with Google: Google has verified the address, so the account is created (or an unfinished
+  // student invitation completed) right here. Mentors and staff still need an existing, activated account.
+  if ((!user || (!user.password_hash && user.role === 'student')) && area === 'student') {
+    user = await signUpStudent(email, String(claims.name || '').trim() || email.split('@')[0]);
+    db.audit(user.id, 'student_signup_google', email);
+  }
   if (!user || !user.password_hash) { db.audit(user?.id || null, 'login_google_refused', email); return back(res, area, 'google_no_account'); }
   if (user.disabled_at) return back(res, area, 'disabled');
   if (user.role === 'mentor') {

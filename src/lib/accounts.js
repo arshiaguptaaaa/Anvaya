@@ -12,7 +12,7 @@ const PATH = { mentor_invite: '/invite', student_invite: '/invite', staff_invite
 
 /** Issues a new link (revoking older unused ones of the same kind) and emails it. */
 /** expiresInMinutes: optional per-link lifetime (admin-chosen, e.g. for a dedicated expiry test); default is the kind's TTL. */
-async function issue(userId, kind, { isResend = false, byUserId = null, expiresInMinutes = null } = {}) {
+async function issue(userId, kind, { isResend = false, byUserId = null, expiresInMinutes = null, data = {} } = {}) {
   const u = await db.one(`select u.*, m.id as mentor_id, coalesce(m.name, s.name, u.name) as display_name
     from anvaya.users u left join anvaya.mentors m on m.user_id = u.id left join anvaya.students s on s.user_id = u.id where u.id = $1`, [userId]);
   if (!u) throw Object.assign(new Error('Account not found.'), { status: 404 });
@@ -23,7 +23,7 @@ async function issue(userId, kind, { isResend = false, byUserId = null, expiresI
     await t.run(`update anvaya.invitations set revoked_at = now() where user_id = $1 and kind = $2 and used_at is null and revoked_at is null`, [userId, kind]);
     await t.run(`insert into anvaya.invitations (mentor_id, user_id, kind, token_hash, expires_at) values ($1,$2,$3,$4,$5)`,
       [kind === 'mentor_invite' ? u.mentor_id : null, userId, kind, sec.sha256(token), expiresAt]);
-    const { jobId: id } = await sendEmail(u.email, kind, { name: u.display_name || 'there', url, expiresAt: expiresAt.toISOString(), isResend }, { secret: true, q: t });
+    const { jobId: id } = await sendEmail(u.email, kind, { name: u.display_name || 'there', url, expiresAt: expiresAt.toISOString(), isResend, ...data }, { secret: true, q: t });
     return id;
   });
   db.audit(byUserId, `${kind}_${isResend ? 'resent' : 'sent'}`, `user:${userId}`);

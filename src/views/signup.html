@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/assets/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app/app.css">
+<title>Anvaya — Create your account</title>
+<meta name="description" content="Create a free Anvaya account to book a free chat, browse mentors and plans, and track your sessions.">
+</head>
+<body>
+<div class="grid-bg"></div>
+<main class="auth-wrap">
+  <div class="card card-gold auth-card reveal">
+    <a href="/" class="brand"><img src="/assets/logo.png" alt=""><span class="brand-text"><span class="brand-name">Anvaya</span><span class="brand-tag">Where Purpose Meets Path</span></span></a>
+    <div class="eyebrow">Free account</div>
+    <h1 class="title">Create your <em>account</em></h1>
+    <p class="sub mb-3">Book a free chat, explore mentors and plans, and keep every session in one place.</p>
+    <div id="googleBox" hidden>
+      <a class="btn btn-ghost btn-block" id="googleBtn" href="/api/auth/google/start?area=student">Sign up with Google</a>
+      <div class="auth-or"><span>or with email</span></div>
+    </div>
+    <form id="signupForm" novalidate>
+      <div class="form-error" hidden></div>
+      <div class="field">
+        <label class="label" for="name">Full name</label>
+        <input class="input" id="name" name="name" autocomplete="name" required maxlength="120">
+      </div>
+      <div class="field">
+        <label class="label" for="email">Email</label>
+        <input class="input" id="email" name="email" type="email" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label class="label" for="phone">Phone (WhatsApp, optional)</label>
+        <input class="input" id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+91 98765 43210">
+      </div>
+      <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <button class="btn btn-primary btn-block mt-1" type="submit">Create account &rarr;</button>
+      <p class="hint mt-1">We’ll email you a link to set your password. By creating an account you agree to our <a href="https://anvayacareers.in/terms.html">Terms</a> and <a href="https://anvayacareers.in/privacy.html">Privacy Policy</a>.</p>
+    </form>
+    <div id="done" class="form-ok" hidden></div>
+    <p class="auth-foot">Already have an account? <a href="/student/login">Log in</a> &middot; <a href="https://anvayacareers.in/">Back to Anvaya</a></p>
+  </div>
+</main>
+<script src="/app/core.js"></script>
+<script src="/app/signup.js"></script>
+</body>
+</html>

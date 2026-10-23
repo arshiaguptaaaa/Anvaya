@@ -10,10 +10,11 @@
   document.getElementById('heading').innerHTML = copy[1];
   document.getElementById('lede').textContent = copy[2];
   document.getElementById('foot').innerHTML = area === 'admin' ? '<a href="/">&larr; Back to Anvaya</a>'
+    : area === 'student' ? 'New here? <a href="/signup">Create a free account</a> &middot; <a href="/">Back to Anvaya</a>'
     : 'New here? Use the link in your welcome email. &middot; <a href="/">Back to Anvaya</a>';
 
   const ERRORS = {
-    google_no_account: 'There’s no active Anvaya account for that Google email. Use the email your account was created with, or accept your invitation first.',
+    google_no_account: area === 'student' ? 'There’s no Anvaya account for that Google email yet.' : 'There’s no active Anvaya account for that Google email. Use the email your account was created with, or accept your invitation first.',
     google_unverified: 'Google hasn’t verified that email address, so it can’t be used to sign in.',
     google_expired: 'That Google sign-in took too long or was started in another tab. Please try again.',
     google_cancelled: 'Google sign-in was cancelled.',

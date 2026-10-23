@@ -104,6 +104,10 @@ app.get(['/student', '/student/*'], (req, res) => {
   page(res, 'student.html');
 });
 app.get(['/invite', '/reset'], (_req, res) => page(res, 'invite.html'));
+app.get('/signup', (req, res) => {
+  if (req.auth) return res.redirect(req.auth.user.role === 'student' ? '/student' : '/login');
+  page(res, 'signup.html');
+});
 
 // ══ APIs ═══════════════════════════════════════════════════════════════
 app.use('/api', require('./routes/auth'));

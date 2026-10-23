@@ -6,7 +6,12 @@
     var nav = document.querySelector('nav'), links = nav && nav.querySelector('.nav-links'), cta = nav && nav.querySelector('.nav-cta');
     if (nav && links && cta && !nav.querySelector('.nav-burger')) {
       var right = document.createElement('div'); right.className = 'nav-right';
-      cta.parentNode.insertBefore(right, cta); right.appendChild(cta);
+      cta.parentNode.insertBefore(right, cta);
+      // Log in / Sign up live on the app host; the public site is a different host in production.
+      var host = location.hostname, APP = /(^|\.)anvayacareers\.in$/.test(host) && host.indexOf('app.') !== 0 ? 'https://app.anvayacareers.in' : '';
+      var login = document.createElement('a'); login.className = 'nav-login'; login.href = APP + '/student/login'; login.textContent = 'Log in';
+      var signup = document.createElement('a'); signup.className = 'nav-signup'; signup.href = APP + '/signup'; signup.textContent = 'Sign up';
+      right.appendChild(login); right.appendChild(signup); right.appendChild(cta);
       var burger = document.createElement('button');
       burger.type = 'button'; burger.className = 'nav-burger'; burger.setAttribute('aria-label', 'Menu'); burger.setAttribute('aria-expanded', 'false');
       burger.innerHTML = '<i></i><i></i><i></i>';
@@ -14,6 +19,8 @@
       var sheet = document.createElement('div'); sheet.className = 'nav-sheet'; sheet.id = 'nav-sheet';
       burger.setAttribute('aria-controls', 'nav-sheet');
       [].forEach.call(links.querySelectorAll('a'), function (a) { var c = a.cloneNode(true); c.removeAttribute('class'); sheet.appendChild(c); });
+      var acct = document.createElement('div'); acct.className = 'nav-sheet-acct';
+      acct.appendChild(login.cloneNode(true)); acct.appendChild(signup.cloneNode(true)); sheet.appendChild(acct);
       var book = cta.cloneNode(true); book.removeAttribute('class'); sheet.appendChild(book);
       document.body.appendChild(sheet);
       var set = function (open) { sheet.classList.toggle('open', open); burger.setAttribute('aria-expanded', String(open)); };

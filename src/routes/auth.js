@@ -13,6 +13,39 @@ const linkLimiter = sec.rateLimiter({ name: 'invite', windowMs: 15 * 60e3, max: 
 const resendLimiter = sec.rateLimiter({ name: 'invite-resend', windowMs: 60 * 60e3, max: 5, key: (req) => req.ip });
 const forgotLimiter = sec.rateLimiter({ name: 'forgot', windowMs: 60 * 60e3, max: 5, key: (req) => `${req.ip}|${String(req.body?.email || '').toLowerCase()}` });
 
+// ── Student sign-up ─────────────────────────────────────────────────────
+// Name + email → an email link to set a password (proves the address before the account can attach to any
+// existing student record or payment). The reply is the same whether or not the email already has an account.
+const signupLimiter = sec.rateLimiter({ name: 'signup', windowMs: 60 * 60e3, max: 8, key: (req) => req.ip });
+const SIGNUP_OK = 'Check your inbox: we’ve sent a link to finish creating your account. It can take a minute to arrive.';
+r.post('/auth/signup', signupLimiter, wrap(async (req, res) => {
+  const b = req.body || {};
+  if (b.website) return res.status(201).json({ ok: true, message: SIGNUP_OK }); // honeypot
+  const name = String(b.name || '').trim().slice(0, 120);
+  const email = String(b.email || '').trim().toLowerCase();
+  const phone = String(b.phone || '').trim().slice(0, 40);
+  if (!name) throw bad('Please enter your name.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw bad('Please enter a valid email address.');
+  if (phone && !/^[+\d][\d\s()-]{6,}$/.test(phone)) throw bad('Please enter a valid phone number, or leave it blank.');
+  const existing = await db.one('select id, role, password_hash, disabled_at from anvaya.users where lower(email) = $1', [email]);
+  if (existing) {
+    // Already registered: a reset link (active account) or a fresh set-up link (never finished). Nothing is revealed.
+    if (!existing.disabled_at && existing.password_hash) await accounts.issue(existing.id, 'password_reset').catch((e) => console.error('[signup]', e.message));
+    else if (!existing.disabled_at && existing.role === 'student') await accounts.issue(existing.id, 'student_invite', { isResend: true, data: { signup: true } }).catch((e) => console.error('[signup]', e.message));
+    return res.status(201).json({ ok: true, message: SIGNUP_OK });
+  }
+  const uid = await db.tx(async (t) => {
+    const u = await t.one("insert into anvaya.users (email, name, role) values ($1,$2,'student') returning id", [email, name]);
+    const st = await t.one('select id from anvaya.students where lower(email) = $1 and user_id is null order by id limit 1', [email]);
+    if (st) await t.run("update anvaya.students set user_id = $1, phone = coalesce(nullif(phone, ''), $2) where id = $3", [u.id, phone, st.id]);
+    else await t.run("insert into anvaya.students (name, email, phone, user_id, status) values ($1,$2,$3,$4,'active')", [name, email, phone, u.id]);
+    return u.id;
+  });
+  await accounts.issue(uid, 'student_invite', { data: { signup: true } }).catch((e) => console.error('[signup]', e.message));
+  db.audit(uid, 'student_signup', email);
+  res.status(201).json({ ok: true, message: SIGNUP_OK });
+}));
+
 r.post('/auth/login', loginIpLimiter, loginLimiter, wrap(async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
