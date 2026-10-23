@@ -105,13 +105,21 @@ const APPROVED_EDITS = [
   [/\n\n<!-- TESTIMONIALS -->[\s\S]*?<\/section>/, ''], // testimonial section (video)
   ['<div class="footer-right"><a href="/privacy.html" style="color:inherit;text-decoration:none;">Privacy Policy</a> &nbsp;&middot;&nbsp; <a href="/terms.html" style="color:inherit;text-decoration:none;">Terms of Service</a> &nbsp;&middot;&nbsp; &copy; 2025 Anvaya &nbsp;&middot;&nbsp; Arshia</div>', '<div class="footer-right">&copy; 2025 Anvaya &nbsp;&middot;&nbsp; Arshia</div>'], // footer links to the privacy policy and terms
 ];
+// Images were moved out of the page into /assets/site (same pictures, compressed; lazy-loaded below the fold).
+// The fixture maps each file back to the exact original data URI, so the check below still proves nothing else changed.
+const BROCHURE_IMAGES = require('./fixtures/brochure-images.json');
+const restoreImages = (html) => html.replace(/src="(\/assets\/site\/[^"]+)"(?: loading="lazy")? decoding="async"/g, (m, p) => {
+  assert.ok(BROCHURE_IMAGES[p], `unknown image ${p}`);
+  return `src="${BROCHURE_IMAGES[p]}"`;
+});
 test('public page = supplied brochure + only the lead-capture script tag', async () => {
+  for (const p of Object.keys(BROCHURE_IMAGES)) assert.equal((await fetch(BASE + p)).status, 200, `${p} is served`);
   const served = Buffer.from(await (await fetch(BASE + '/')).arrayBuffer()).toString('latin1');
   assert.equal(served.split(LEAD_TAG).length, 2);
   const reverted = APPROVED_EDITS.reduce((html, [now, was]) => {
     assert.equal((html.match(now instanceof RegExp ? new RegExp(now.source, 'g') : new RegExp(now.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length, 1, `approved edit present once: ${now}`);
     return html.replace(now, was);
-  }, served.replace(LEAD_TAG, ''));
+  }, restoreImages(served.replace(LEAD_TAG, '')));
   assert.equal(crypto.createHash('sha256').update(Buffer.from(reverted, 'latin1')).digest('hex'), ORIGINAL_SHA, 'nothing else on the brochure changed');
 });
 
