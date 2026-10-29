@@ -35,6 +35,37 @@ r.get('/team-options', staff, wrap(async (_req, res) => {
   res.json(await db.all("select id, coalesce(nullif(name,''), email) as name, role from anvaya.users where role in ('admin','ops') and disabled_at is null order by name"));
 }));
 
+// Visit sources (?src= link codes): clicks → free chats → checkouts → paid, by the latest code before each action.
+r.get('/sources', staff, wrap(async (req, res) => {
+  const days = Math.min(365, Math.max(1, Number(req.query.days) || 90));
+  const since = new Date(Date.now() - days * 86400e3);
+  res.json(await db.all(`with v as (select source, sum(visits)::int as clicks from anvaya.ref_visits where day >= $1::date group by 1),
+      l as (select coalesce(nullif(ref_source, ''), '(no code)') as source, count(*)::int as free_chats from anvaya.leads where created_at >= $1 group by 1),
+      e as (select coalesce(nullif(ref_source, ''), '(no code)') as source, count(*)::int as checkouts,
+              count(*) filter (where status = 'converted')::int as paid, coalesce(sum(amount_paise) filter (where status = 'converted'), 0)::bigint as paid_paise,
+              count(*) filter (where entry = 'quiz')::int as via_quiz
+            from anvaya.checkout_enquiries where started_at >= $1 group by 1)
+    select coalesce(v.source, l.source, e.source) as source, coalesce(v.clicks, 0) as clicks, coalesce(l.free_chats, 0) as free_chats,
+      coalesce(e.checkouts, 0) as checkouts, coalesce(e.paid, 0) as paid, coalesce(e.paid_paise, 0) as paid_paise, coalesce(e.via_quiz, 0) as via_quiz
+    from v full join l on l.source = v.source full join e on e.source = coalesce(v.source, l.source)
+    order by paid desc, checkouts desc, free_chats desc, clicks desc`, [since]));
+}));
+
+// Payment-page checkout enquiries: started / failed / abandoned / converted, with reminder delivery status.
+r.get('/checkout-enquiries', staff, wrap(async (_req, res) => {
+  const enquiries = require('../../lib/enquiries');
+  const rows = await db.all(`select e.*, s.name as student_name from anvaya.checkout_enquiries e left join anvaya.students s on s.id = e.student_id
+    order by e.last_activity_at desc limit 500`);
+  for (const e of rows) e.follow_up = await enquiries.followUp(e);
+  const since = new Date(Date.now() - 30 * 86400e3);
+  const stats = await db.one(`select count(*)::int as total, count(*) filter (where status = 'converted')::int as converted,
+      count(*) filter (where status = 'abandoned')::int as abandoned, count(*) filter (where status = 'failed')::int as failed,
+      count(*) filter (where status = 'started')::int as started,
+      count(*) filter (where status = 'converted' and (abandoned_at is not null or failed_at is not null))::int as recovered
+    from anvaya.checkout_enquiries where started_at >= $1`, [since]);
+  res.json({ rows, stats });
+}));
+
 r.get('/leads', staff, wrap(async (_req, res) => {
   res.json(await db.all(`select l.*, coalesce(nullif(u.name,''), u.email) as owner_name,
     (select count(*) from anvaya.lead_activities a where a.lead_id = l.id) as activity_count

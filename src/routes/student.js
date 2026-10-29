@@ -124,10 +124,11 @@ r.get('/sessions', wrap(async (req, res) => {
       or (l.group_id is null and l.cohort_id in (select cohort_id from anvaya.cohort_members where student_id = $1))
       or (l.group_id is null and l.cohort_id is null and (l.track_id is null or l.track_id in (select track_id from anvaya.enrollments where student_id = $1 and status = 'active'))))
     order by l.starts_at`, [sid]) : [];
-  const bookings = await db.all(`select b.id, b.kind, b.service, b.scheduled_at, b.ends_at, b.duration, b.status, b.meet_link, b.price_paise, b.order_id, b.hold_expires_at, b.mentor_id, b.service_id, b.proposed_by is not null as has_proposal, m.name as mentor_name
+  const bookings = await db.all(`select b.id, b.kind, b.service, b.scheduled_at, b.ends_at, b.duration, b.status, b.meet_link, b.price_paise, b.order_id,
+      (select coalesce(sum(x.student_reschedule_count), 0)::int from anvaya.bookings x where x.id = b.id or (b.order_id is not null and x.order_id = b.order_id)) as plan_reschedules, b.hold_expires_at, b.mentor_id, b.service_id, b.proposed_by is not null as has_proposal, m.name as mentor_name
     from anvaya.bookings b left join anvaya.mentors m on m.id = b.mentor_id where b.student_id = $1 and b.status <> 'cancelled' order by b.scheduled_at desc`, [sid]);
   const st = await db.one('select booking_blocked_at from anvaya.students where id = $1', [sid]);
-  decorate(bookings, st, (Number(await settings.get('reschedule_cutoff_hours')) || 2) * 3600e3);
+  decorate(bookings, st, (Number(await settings.get('reschedule_cutoff_hours')) || 24) * 3600e3);
   for (const b of bookings) delete b.meet_link;
   res.json({ live, bookings, has_access: !!sub, booking_blocked: !!st.booking_blocked_at, no_show: await noShowState(sid), policy: require('../mailer').POLICY_TEXT });
 }));
@@ -205,9 +206,10 @@ r.post('/bookings/:id/reschedule', wrap(async (req, res) => {
 r.post('/bookings/:id/cancel', wrap(async (req, res) => {
   const b = await sessions.cancel(id(req), { by: req.auth.user.id, asStudentId: me(req) });
   if (b.kind === 'paid_session' && b.status === 'scheduled') {
-    await db.run("update anvaya.students set needs_followup = true, followup_reason = 'Cancelled a paid session — refund or rebook' where id = $1", [b.student_id]);
+    await db.run("update anvaya.students set needs_followup = true, followup_reason = 'Cancelled a paid session (not refundable under the policy) — check in' where id = $1", [b.student_id]);
   }
-  res.json({ ok: true, refund: b.kind === 'paid_session' && b.status === 'scheduled' ? 'The Anvaya team will contact you about a refund or a new time.' : null });
+  // Refund & Rescheduling Policy: cancellations by the student aren't refunded (rescheduling once is the alternative).
+  res.json({ ok: true, refund: b.kind === 'paid_session' && b.status === 'scheduled' ? 'Cancelled. Under our policy, sessions you cancel aren’t refunded. If you meant to move it, contact the Anvaya team.' : null });
 }));
 /** No suitable slot: send preferred dates for the team to arrange. */
 r.post('/session-requests', wrap(async (req, res) => {
@@ -233,7 +235,8 @@ function decorate(bookings, s, notice) {
   for (const b of bookings) {
     const upcoming = new Date(b.scheduled_at).getTime() > Date.now() && ['scheduled', 'requested', 'pending_payment'].includes(b.status);
     const far = new Date(b.scheduled_at).getTime() - Date.now() >= notice;
-    b.can_cancel = upcoming && (far || b.status !== 'scheduled'); b.can_reschedule = upcoming && far && ['scheduled', 'requested'].includes(b.status) && !b.has_proposal && !s.booking_blocked_at;
+    b.can_cancel = upcoming && (far || b.status !== 'scheduled'); b.reschedule_used = Number(b.plan_reschedules || 0) >= 1; // one per plan (Refund & Rescheduling Policy)
+    b.can_reschedule = upcoming && far && ['scheduled', 'requested'].includes(b.status) && !b.has_proposal && !s.booking_blocked_at && !b.reschedule_used;
     b.needs_exception = upcoming && !far && b.status === 'scheduled';
     b.meeting_link = b.status === 'scheduled' ? (b.meet_link || null) : null; // only a real Google Meet link, once confirmed
     b.can_join = !!b.meeting_link && Date.now() >= new Date(b.scheduled_at).getTime() - 10 * 60e3 && Date.now() < new Date(b.ends_at || b.scheduled_at).getTime() + 30 * 60e3;
@@ -253,8 +256,9 @@ r.get('/home', wrap(async (req, res) => {
   const payment = sub ? await db.one(`select p.provider, p.paid_at from anvaya.payments p where p.order_id = $1 and p.status = 'paid' order by p.id desc limit 1`, [sub.last_order_id]) : null;
   const group = await db.one(`select g.id, g.name, g.whatsapp_link, g.meet_link, m.id as mentor_id, m.name as mentor_name, m.headline as mentor_headline
     from anvaya.group_members gm join anvaya.mentor_groups g on g.id = gm.group_id left join anvaya.mentors m on m.id = g.mentor_id where gm.student_id = $1 and gm.left_at is null`, [sid]);
-  const notice = (Number(await settings.get('reschedule_cutoff_hours')) || 2) * 3600e3;
+  const notice = (Number(await settings.get('reschedule_cutoff_hours')) || 24) * 3600e3;
   const bookings = await db.all(`select b.id, b.kind, b.service, b.scheduled_at, b.ends_at, b.duration, b.status, b.meet_link, m.name as mentor_name, b.mentor_id, b.service_id, b.hold_expires_at, b.proposed_by is not null as has_proposal, b.rescheduled_from, b.calendar_status, b.price_paise, b.order_id,
+      (select coalesce(sum(x.student_reschedule_count), 0)::int from anvaya.bookings x where x.id = b.id or (b.order_id is not null and x.order_id = b.order_id)) as plan_reschedules,
       case when b.notes_visibility = 'student' then b.session_notes else null end as shared_notes
     from anvaya.bookings b left join anvaya.mentors m on m.id = b.mentor_id where b.student_id = $1 and b.status in ('scheduled','requested','pending_payment') and b.ends_at > now()
     order by b.scheduled_at limit 10`, [sid]);

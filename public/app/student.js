@@ -102,7 +102,8 @@
       b.status === 'requested' && b.has_proposal ? `<button class="btn btn-primary btn-sm" data-accept="${b.id}">Accept new time</button>` : '',
       b.can_reschedule ? `<button class="btn btn-ghost btn-sm" data-move="${b.id}" data-m="${b.mentor_id}" data-svc="${b.service_id || ''}">Reschedule</button>` : '',
       b.can_cancel ? `<button class="btn btn-ghost btn-sm" data-cancel="${b.id}">${b.status === 'scheduled' ? 'Cancel' : 'Withdraw'}</button>` : '',
-      b.needs_exception ? `<button class="btn btn-ghost btn-sm" data-exception="${b.id}" title="Inside 2 hours, changes need the Anvaya team">Request a change</button>` : '',
+      b.reschedule_used && b.status === 'scheduled' && upcoming && !b.needs_exception ? '<span class="small muted" title="One reschedule per plan">Reschedule used</span>' : '',
+      b.needs_exception ? `<button class="btn btn-ghost btn-sm" data-exception="${b.id}" title="Less than 24 hours away: changes need the Anvaya team">Request a change</button>` : '',
     ].join('');
   }
   function blockedNotice(x) {
@@ -125,7 +126,7 @@
       try { const r = await api(`/api/student/bookings/${b.dataset.accept}/accept-proposal`, { method: 'POST' }); toast(r.next === 'payment' ? 'Accepted — pay to confirm the session' : 'Accepted — your confirmation email is on its way'); refresh(); } catch (e) { toast(e.message, true); }
     }));
     root.querySelectorAll('[data-exception]').forEach((b) => b.addEventListener('click', () => {
-      A.formModal({ eyebrow: 'Inside 2 hours', title: 'Request a <em>change</em>', intro: '<p class="small muted mb-2">Online changes close 2 hours before the start. Tell the Anvaya team what you need and we’ll do our best.</p>',
+      A.formModal({ eyebrow: 'Less than 24 hours away', title: 'Request a <em>change</em>', intro: '<p class="small muted mb-2">Online changes close 24 hours before the start, and a late change normally counts the session as used (see our <a href="https://anvayacareers.in/refund-policy.html" target="_blank" rel="noopener">Refund &amp; Rescheduling Policy</a>). In a genuine emergency, tell the Anvaya team what happened and we’ll see what we can do.</p>',
         fields: [{ name: 'body', label: 'What do you need?', type: 'textarea', required: true, span2: true, rows: 4 }],
         onSave: (x) => api('/api/student/support', { method: 'POST', body: { subject: `Change request for session #${b.dataset.exception}`, category: 'reschedule_exception', body: x.body } }) })
         .then(() => toast('Sent to the Anvaya team')).catch(() => {});
@@ -138,7 +139,7 @@
       }, q, { moving: true });
     }));
     root.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
-      if (!await confirmBox('Cancel this session?', 'Your host is told and the slot is released. Check-ups go back to your plan allowance; for paid sessions, the team will contact you about a refund or a new time.', { danger: true, ok: 'Cancel session' })) return;
+      if (!await confirmBox('Cancel this session?', 'Your host is told and the slot is released. Check-ups go back to your plan allowance. Paid sessions you cancel aren’t refunded under our policy; if you only need a different time, reschedule instead (once per plan, at least 24 hours before).', { danger: true, ok: 'Cancel session' })) return;
       const r = await api(`/api/student/bookings/${b.dataset.cancel}/cancel`, { method: 'POST', body: {} }); toast(r.refund || 'Cancelled'); refresh();
     }));
   }

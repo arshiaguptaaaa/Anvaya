@@ -51,4 +51,31 @@ r.get('/cron/run', wrap(async (req, res) => {
   res.json({ ran: results.length, failed: results.filter((x) => !x.ok).length });
 }));
 
+// Read-only health of the background queue and payment set-up (same secret as /cron/run). Never returns secret values.
+r.get('/cron/status', wrap(async (req, res) => {
+  const secret = process.env.CRON_SECRET || '';
+  const sent = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!secret || sent.length !== secret.length || !crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(secret))) return res.status(401).json({ error: 'unauthorized' });
+  const db = require('../db');
+  const settings = require('../lib/settings');
+  const payments = require('../lib/payments');
+  res.json({
+    migrations: (await db.all("select name from public.anvaya_migrations order by name").catch(() => [])).map((x) => x.name),
+    queue: await db.all(`select kind, status, count(*)::int as n, max(last_error) filter (where status in ('failed','dead')) as last_error
+      from anvaya.jobs where status <> 'done' or finished_at > now() - interval '1 day' group by kind, status order by kind, status`),
+    lastFinishedAt: (await db.one("select max(finished_at) as t from anvaya.jobs where status = 'done'"))?.t || null,
+    payments: { razorpayApiKeys: payments.configured(), keyMode: (process.env.RAZORPAY_KEY_ID || '').replace(/^(rzp_[a-z]+)_.*$/, '$1'),
+      // read-only call proving the keys authenticate (lists one order; creates and charges nothing)
+      razorpayAuth: payments.configured() ? await payments.rzp('GET', '/orders?count=1').then(() => 'ok').catch((e) => e.message) : 'not configured',
+      dashboardCheckout: payments.checkoutConfig().provider, reconcileEvery: 'hourly (payments.reconcile) + before each reminder',
+      webhookSecret: !!process.env.RAZORPAY_WEBHOOK_SECRET,
+      recentWebhooks: await db.all("select event_type, signature_valid, status, received_at from anvaya.webhook_events order by id desc limit 5").catch(() => []) },
+    paymentSheet: { url: !!process.env.PAYMENT_SHEET_WEBHOOK_URL, token: !!process.env.PAYMENT_SHEET_TOKEN,
+      notifyEmail: process.env.PAYMENT_NOTIFY_EMAIL || 'teamanvaya.in@gmail.com', pageConfirmationSender: await settings.get('page_confirmation_sender'),
+      rows: await db.all('select status, sheet_status, page_reported, count(*)::int as n from anvaya.gateway_payments group by 1,2,3') },
+    mail: require('../mailer').mailMode(),
+    checkoutEnquiries: await db.all('select status, consent, sheet_status, count(*)::int as n from anvaya.checkout_enquiries group by 1,2,3').catch(() => []),
+  });
+}));
+
 module.exports = r;

@@ -11,6 +11,9 @@ const PORT = 4000 + Math.floor(Math.random() * 1000);
 const SHEET_PORT = PORT + 1;
 let sheetMode = 'ok';
 const sheetHits = [];
+// stands in for the payments Apps Script: one row per payment id, updated in place
+let paySheetMode = 'ok';
+const payRows = new Map(), payPosts = [], enqRows = new Map();
 Object.assign(process.env, {
   DATABASE_URL: 'pglite://memory', MAIL_TRANSPORT: 'memory', RESEND_API_KEY: '', SMTP_HOST: '', STORAGE_DRIVER: 'memory',
   SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '', JOBS_AUTORUN: 'false',
@@ -18,6 +21,7 @@ Object.assign(process.env, {
   ADMIN_EMAIL: 'admin@anvaya.test', ADMIN_PASSWORD: 'Admin-pass-2026',
   RAZORPAY_KEY_ID: 'rzp_fake_test', RAZORPAY_KEY_SECRET: 'rzp-secret', RAZORPAY_WEBHOOK_SECRET: 'whsec-test',
   GOOGLE_SHEET_WEBHOOK_URL: `http://localhost:${SHEET_PORT}/exec`, GOOGLE_CALENDAR_FAKE: '1',
+  PAYMENT_SHEET_WEBHOOK_URL: `http://localhost:${SHEET_PORT}/paysheet`, PAYMENT_SHEET_TOKEN: 'sheet-token', PAYMENT_NOTIFY_EMAIL: 'team@anvaya.test', PAYMENT_SHEET_FIRST_TRY_MS: '0', PAYMENT_PAGE_WAIT_MS: '0',
 });
 const app = require('../src/app');
 const db = require('../src/db');
@@ -83,7 +87,22 @@ const ids = {};
 
 test.before(async () => {
   sheet = http.createServer((req, res) => {
-    let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { sheetHits.push(Object.fromEntries(new URLSearchParams(b))); res.statusCode = sheetMode === 'ok' ? 200 : 500; res.end('{}'); });
+    let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
+      if (req.url === '/paysheet') {
+        const d = JSON.parse(b); payPosts.push(d);
+        if (paySheetMode !== 'ok') { res.statusCode = 200; return res.end('<html>Error</html>'); }
+        if (d.token !== 'sheet-token') return res.end(JSON.stringify({ status: 'error', message: 'bad token' }));
+        if (d.action === 'enquiry') { // one row per enquiry id in "Abandoned Checkouts"
+          if (d.token !== 'sheet-token') return res.end(JSON.stringify({ status: 'error', message: 'not authorised' }));
+          enqRows.set(d.enquiry_id, { ...enqRows.get(d.enquiry_id), ...d });
+          return res.end(JSON.stringify({ status: 'ok', row: [...enqRows.keys()].indexOf(d.enquiry_id) + 6 }));
+        }
+        const had = payRows.has(d.payment_id); // matched by payment id, like the real script
+        if (!had && !d.append_if_missing) return res.end(JSON.stringify({ status: 'waiting' }));
+        payRows.set(d.payment_id, { ...payRows.get(d.payment_id), ...Object.fromEntries(Object.entries(d).filter(([k, v]) => v !== '' || !payRows.get(d.payment_id)?.[k])) });
+        return res.end(JSON.stringify({ status: 'ok', row: [...payRows.keys()].indexOf(d.payment_id) + 2, created: !had }));
+      }
+      sheetHits.push(Object.fromEntries(new URLSearchParams(b))); res.statusCode = sheetMode === 'ok' ? 200 : 500; res.end('{}'); });
   });
   await new Promise((r) => sheet.listen(SHEET_PORT, r));
   await new Promise((r) => { server = app.listen(PORT, r); });
@@ -95,6 +114,9 @@ const ORIGINAL_SHA = '05995cd3a1e0fa7719fd871937c3daca475666019061eaa71e628d09a5
 const LEAD_TAG = '<script src="/app/lead-capture.js" defer></script>\n';
 // Content edits approved by the owner, applied on top of the supplied brochure: [now, originally].
 const APPROVED_EDITS = [
+  ["<a href=\"/terms.html\" style=\"color:inherit;text-decoration:none;\">Terms of Service</a> &nbsp;&middot;&nbsp; <a href=\"/refund-policy.html\" style=\"color:inherit;text-decoration:none;\">Refund Policy</a> &nbsp;&middot;&nbsp; &copy; 2025 Anvaya", "<a href=\"/terms.html\" style=\"color:inherit;text-decoration:none;\">Terms of Service</a> &nbsp;&middot;&nbsp; &copy; 2025 Anvaya"], // footer: Refund Policy link (26 Oct 2026)
+  ["        <details>\n          <summary>How do the sessions work? <span class=\"faq-plus\">+</span></summary>\n          <p class=\"faq-body\">Every session is live and 1:1 on Google Meet. After paying, you pick your time; you&rsquo;ll get a confirmation email with the Meet link and a short pre-session questionnaire. Multi-session plans are booked one session at a time, at a pace that suits you. Sessions are not recorded unless you ask and we both agree.</p>\n        </details>\n        <details>\n          <summary>Can I reschedule? <span class=\"faq-plus\">+</span></summary>\n          <p class=\"faq-body\">Yes, once per plan, as long as you tell us at least 24 hours before the session. Use the reschedule link in your booking email or write to teamanvaya.in@gmail.com. A session missed, or changed with less than 24 hours&rsquo; notice, counts as used. In a genuine emergency, message us and we&rsquo;ll see what we can do.</p>\n        </details>\n        <details>\n          <summary>Do you give refunds? <span class=\"faq-plus\">+</span></summary>\n          <p class=\"faq-body\">If you cancel, the fee isn&rsquo;t refunded &mdash; please use your one reschedule instead. If we cancel or can&rsquo;t deliver what you paid for, you get a full refund to your original payment method. Full details: <a href=\"/refund-policy.html\" style=\"color:var(--gold)\">Refund &amp; Rescheduling Policy</a>.</p>\n        </details>\n        <details>\n          <summary>What happens right after payment? <span class=\"faq-plus\">+</span></summary>\n          <p class=\"faq-body\">You&rsquo;re redirected to Calendly to book your first session immediately. A confirmation email with your booking link and the pre-session questionnaire is sent to your inbox.</p>\n        </details>\n", "        <details>\n          <summary>What happens right after payment? <span class=\"faq-plus\">+</span></summary>\n          <p class=\"faq-body\">You&rsquo;re redirected to Calendly to book your first session immediately. A confirmation email with your booking link and the pre-session questionnaire is sent to your inbox.</p>\n        </details>\n"], // FAQ: how sessions work, rescheduling, refunds (26 Oct 2026)
+  ["        <details open>\n          <summary>What&rsquo;s the difference between the two plans? <span class=\"faq-plus\">+</span></summary>\n          <p class=\"faq-body\">The Complete Resume Build &amp; Rewrite (&#8377;2,250, 3 &times; 45 min) covers the full resume &mdash; dissection, extraction, rewriting, and final build. The Full Picture &mdash; Profile Strategy + Resume (&#8377;3,999, 3 &times; 60 min + a bonus 30 min) includes all of that, plus career direction, LinkedIn, application strategy, and a portfolio roadmap.</p>\n        </details>\n", "        <details open>\n          <summary>What&rsquo;s the difference between the two plans? <span class=\"faq-plus\">+</span></summary>\n          <p class=\"faq-body\">The Complete Resume Build (&#8377;2,250) covers the full resume &mdash; dissection, extraction, rewriting, and final build. The End-to-End Profile Overhaul (&#8377;3,999) includes all of that, plus career direction, LinkedIn, application strategy, portfolio roadmap, and a bonus 30-min session.</p>\n        </details>\n"], // FAQ: current plan names (26 Oct 2026)
   ['<div class="plan-price">&#8377;2,250</div>\n          </div>\n          <div class="plan-sess">', '<div class="plan-price">&#8377;2,250</div>\n            <div class="plan-strike">&#8377;2,500</div>\n            <div class="plan-off">10% off</div>\n          </div>\n          <div class="plan-sess">'], // 10% off tag removed (price unchanged)
   ['</script>\n<link rel="stylesheet" href="/app/site.css">\n<script src="/app/site.js" defer></script>\n</head>', '</script>\n</head>'], // page polish (site.css / site.js)
   ['<span class="hstat-n">500</span><span class="hstat-l">Resumes reviewed</span>', '<span class="hstat-n">50+</span><span class="hstat-l">Resumes reviewed</span>'],
@@ -503,7 +525,7 @@ test('check-ups: booked within plan limits; database prevents double booking und
   const conf = lastEmailTo('rahul@students.test');
   assert.match(conf.subject, /^Confirmed: Check-up call/);
   assert.match(conf.text, /Join Google Meet: https:\/\/meet\.google\.com\/fak-/); assert.match(conf.text, /Add to Google Calendar: https:\/\/calendar\.google\.com/);
-  assert.match(conf.text, /\.ics\): http.*\/api\/public\/ics\//); assert.match(conf.text, /up to 2 hours before/); assert.match(conf.text, /No-show policy/);
+  assert.match(conf.text, /\.ics\): http.*\/api\/public\/ics\//); assert.match(conf.text, /once per plan, at least 24 hours before/); assert.match(conf.text, /refund-policy\.html/); assert.match(conf.text, /No-show policy/);
   assert.equal(conf.attachments[0].filename, 'anvaya-session.ics'); assert.match(conf.attachments[0].content, /BEGIN:VEVENT/);
   assert.match(lastEmailTo('priya@mentors.test').subject, /^Confirmed: Check-up call/, 'host confirmed too');
   const icsLink = conf.text.match(/http\S+\/api\/public\/ics\/\S+/)[0];
@@ -973,6 +995,7 @@ test('existing payment page (public key only): verified webhook activates the pu
     const sig = crypto.createHmac('sha256', 'whsec-test').update(body).digest('hex');
     return fetch(`${BASE}/api/webhooks/razorpay`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': sig, 'X-Razorpay-Event-Id': id } });
   };
+  await require('../src/lib/settings').set('page_confirmation_sender', 'app', null); // the app, not the page's Apps Script, confirms
   const prod = (await admin.get('/api/admin/products')).json.find((x) => x.public_key === '500mba');
   const pay = { id: 'pay_page_1', order_id: null, amount: rupees(450), status: 'captured', method: 'upi', email: 'Riya.Page@Buyers.test', contact: '+919800000001', notes: { plan: prod.name, sessions: '1 × 30 min' }, fee: 900, tax: 162 };
   const forged = await fetch(`${BASE}/api/webhooks/razorpay`, { method: 'POST', body: JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { ...pay, id: 'pay_forged' } } } }), headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': 'bad', 'X-Razorpay-Event-Id': 'evt_forged' } });
@@ -999,6 +1022,143 @@ test('existing payment page (public key only): verified webhook activates the pu
   assert.ok(!(await db.one("select 1 from anvaya.students where email in ('low@buyers.test','unk@buyers.test')")), 'nothing activated for mismatches');
   const flags = await db.all("select title from anvaya.tasks where dedupe_key like 'page-pay-flag:%'");
   assert.ok(flags.some((f) => /pay_page_low.*below/.test(f.title)) && flags.some((f) => /pay_page_unknown.*not recognised/.test(f.title)));
+});
+
+test('payment Sheet + team email: verified payments copied once per payment id, a Sheet outage never blocks access, failures and refunds update the same row', async () => {
+  const send = (event, payload, id) => {
+    const body = JSON.stringify({ event, payload, created_at: Date.now() });
+    const sig = crypto.createHmac('sha256', 'whsec-test').update(body).digest('hex');
+    return fetch(`${BASE}/api/webhooks/razorpay`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': sig, 'X-Razorpay-Event-Id': id } });
+  };
+  const svc = (await admin.get('/api/admin/products')).json.find((x) => x.public_key === '500mba');
+  const pay = { id: 'pay_sheet_1', order_id: null, amount: svc.price_paise, status: 'captured', method: 'upi', email: 'sheet.buyer@buyers.test', contact: '+919800000123', notes: { plan: svc.name } };
+  const teamMails = () => mailer.sent.filter((m) => m.to === 'team@anvaya.test' && /pay_sheet_1/.test(m.text));
+  // the Sheet is down: the payment still activates everything
+  paySheetMode = 'fail';
+  assert.equal((await send('payment.captured', { payment: { entity: pay } }, 'evt_sheet_1')).status, 200);
+  await jobs.processDue({ kinds: ['payments.webhook', 'email.send', 'paysheet.sync'], limit: 50 });
+  const o = await db.one("select o.* from anvaya.orders o join anvaya.students s on s.id = o.student_id where s.email = 'sheet.buyer@buyers.test'");
+  assert.equal(o.status, 'paid');
+  assert.ok(await db.one('select 1 from anvaya.service_cases where order_id = $1', [o.id]), 'access granted despite the Sheet failure');
+  const mine = mailer.sent.filter((m) => m.to === 'sheet.buyer@buyers.test');
+  assert.equal(mine.filter((m) => /Payment received/.test(m.subject)).length, 1, 'one confirmation');
+  assert.ok(mine.some((m) => /calendly\.com\/teamanvaya-in\/30min/.test(m.text)), 'confirmation carries the booking link');
+  assert.equal(mine.filter((m) => /token=/.test(m.text)).length, 1, 'one account invitation');
+  let g = await db.one("select * from anvaya.gateway_payments where provider_payment_id = 'pay_sheet_1'");
+  assert.equal(g.status, 'paid'); assert.equal(g.sheet_status, 'failed'); assert.match(g.sheet_error, /not JSON/);
+  assert.equal(teamMails().length, 1, 'team told once');
+  // the Sheet comes back: the hourly sweep copies it, once
+  paySheetMode = 'ok';
+  await jobs.runNow(await jobs.enqueue('paysheet.resync', {}, { dedupeKey: `t-resync-${Date.now()}` }));
+  await jobs.processDue({ kinds: ['paysheet.sync'], limit: 20 });
+  g = await db.one("select * from anvaya.gateway_payments where provider_payment_id = 'pay_sheet_1'");
+  assert.equal(g.sheet_status, 'synced');
+  const row = payRows.get('pay_sheet_1');
+  assert.equal(row.status, 'Paid (verified by Razorpay)'); assert.equal(row.amount, '500'); assert.equal(row.email, 'sheet.buyer@buyers.test');
+  assert.equal(row.phone, '+919800000123'); assert.equal(row.plan, svc.name); assert.equal(row.name, '', 'no guessed name: the page row keeps the real one'); assert.ok(row.date);
+  // Razorpay retries (same and new event ids): nothing new anywhere
+  const posts = payPosts.length;
+  await send('payment.captured', { payment: { entity: pay } }, 'evt_sheet_1');
+  await send('payment.captured', { payment: { entity: pay } }, 'evt_sheet_1_retry');
+  await jobs.processDue({ kinds: ['payments.webhook', 'email.send', 'paysheet.sync'], limit: 50 });
+  assert.equal(payPosts.length, posts, 'no extra Sheet writes'); assert.equal(teamMails().length, 1);
+  assert.equal(mailer.sent.filter((m) => m.to === 'sheet.buyer@buyers.test' && /Payment received/.test(m.subject)).length, 1);
+  // a late "failed" for the same payment can't undo it
+  await send('payment.failed', { payment: { entity: { ...pay, status: 'failed', error_description: 'late' } } }, 'evt_sheet_late_fail');
+  await jobs.processDue({ kinds: ['payments.webhook', 'paysheet.sync'], limit: 20 });
+  assert.equal((await db.one("select status from anvaya.gateway_payments where provider_payment_id = 'pay_sheet_1'")).status, 'paid');
+  // a failed attempt is recorded and copied, without activating anything or emailing anyone
+  const fail = { id: 'pay_sheet_fail', order_id: null, amount: svc.price_paise, status: 'failed', method: 'card', email: 'nopay@buyers.test', contact: '+919800000777', notes: { plan: svc.name }, error_description: 'Card declined by bank', created_at: Math.floor(Date.now() / 1000) };
+  const before = mailer.sent.length;
+  await send('payment.failed', { payment: { entity: fail } }, 'evt_sheet_fail');
+  await send('payment.failed', { payment: { entity: fail } }, 'evt_sheet_fail_again');
+  await jobs.processDue({ kinds: ['payments.webhook', 'paysheet.sync', 'email.send'], limit: 20 });
+  assert.equal(payRows.get('pay_sheet_fail').status, 'Failed'); assert.equal(payRows.get('pay_sheet_fail').note, 'Card declined by bank');
+  assert.ok(!(await db.one("select 1 from anvaya.students where email = 'nopay@buyers.test'")), 'failed attempt creates no student');
+  assert.equal(mailer.sent.length, before, 'no emails for a failed attempt');
+  // refund from the Razorpay dashboard: the same row flips to Refunded, the team hears once
+  const rf = { id: 'rfnd_sheet_1', payment_id: 'pay_sheet_1', amount: svc.price_paise, status: 'processed' };
+  await send('refund.processed', { refund: { entity: rf } }, 'evt_sheet_rf');
+  await send('refund.processed', { refund: { entity: rf } }, 'evt_sheet_rf_again');
+  await jobs.processDue({ kinds: ['payments.webhook', 'paysheet.sync', 'email.send'], limit: 20 });
+  assert.equal(payRows.get('pay_sheet_1').status, 'Refunded'); assert.equal(payRows.get('pay_sheet_1').refunded, '500');
+  assert.equal([...payRows.keys()].filter((k) => k === 'pay_sheet_1').length, 1);
+  assert.equal(mailer.sent.filter((m) => m.to === 'team@anvaya.test' && /^Refunded/.test(m.subject) && /pay_sheet_1/.test(m.text)).length, 1);
+  // while the page's Apps Script still sends its own confirmation, the app sends only the invitation (no second confirmation)
+  const settingsLib = require('../src/lib/settings');
+  await settingsLib.set('page_confirmation_sender', 'apps_script', null);
+  payRows.set('pay_sheet_2', { payment_id: 'pay_sheet_2', name: 'Name From Page', status: 'Completed' }); // the page reported it (its script emailed)
+  await send('payment.captured', { payment: { entity: { ...pay, id: 'pay_sheet_2', email: 'script.confirms@buyers.test' } } }, 'evt_sheet_2');
+  await jobs.processDue({ kinds: ['payments.webhook', 'email.send', 'paysheet.sync'], limit: 50 });
+  const m2 = mailer.sent.filter((m) => m.to === 'script.confirms@buyers.test');
+  assert.equal(m2.filter((m) => /Payment received/.test(m.subject)).length, 0);
+  assert.equal(m2.filter((m) => /token=/.test(m.text)).length, 1, 'invitation still sent');
+  assert.equal(payRows.get('pay_sheet_2').status, 'Paid (verified by Razorpay)');
+  assert.equal(mailer.sent.filter((m) => m.to === 'team@anvaya.test' && /pay_sheet_2/.test(m.text)).length, 0, 'the page script already told the team');
+  assert.equal(payRows.get('pay_sheet_2').name, 'Name From Page', 'same row, page name kept');
+  // the page never reported this one (browser closed): the app waits for the page's row, then adds it and sends both emails once
+  process.env.PAYMENT_PAGE_WAIT_MS = String(3600e3);
+  const pay3 = { ...pay, id: 'pay_sheet_3', email: 'closed.tab@buyers.test' };
+  await send('payment.captured', { payment: { entity: pay3 } }, 'evt_sheet_3');
+  await jobs.processDue({ kinds: ['payments.webhook', 'email.send', 'paysheet.sync'], limit: 50 });
+  let g3 = await db.one("select * from anvaya.gateway_payments where provider_payment_id = 'pay_sheet_3'");
+  assert.equal(g3.sheet_status, 'failed'); assert.match(g3.sheet_error, /Waiting for the payment page/); assert.equal(g3.page_reported, null);
+  assert.ok(!payRows.has('pay_sheet_3'), 'no row added while waiting for the page');
+  assert.equal(mailer.sent.filter((m) => m.to === 'closed.tab@buyers.test' && /Payment received/.test(m.subject)).length, 0);
+  process.env.PAYMENT_PAGE_WAIT_MS = '0';
+  for (let i = 0; i < 2; i++) {
+    await jobs.runNow(await jobs.enqueue('paysheet.resync', {}, { dedupeKey: `t-resync3-${i}-${Date.now()}` }));
+    await jobs.processDue({ kinds: ['paysheet.sync', 'email.send'], limit: 20 });
+  }
+  g3 = await db.one("select * from anvaya.gateway_payments where provider_payment_id = 'pay_sheet_3'");
+  assert.equal(g3.sheet_status, 'synced'); assert.equal(g3.page_reported, false);
+  assert.equal(payRows.get('pay_sheet_3').status, 'Paid (verified by Razorpay)');
+  const m3 = mailer.sent.filter((m) => m.to === 'closed.tab@buyers.test');
+  assert.equal(m3.filter((m) => /Payment received/.test(m.subject)).length, 1, 'app confirms once');
+  assert.ok(m3.some((m) => /calendly\.com/.test(m.text)));
+  assert.equal(mailer.sent.filter((m) => m.to === 'team@anvaya.test' && /pay_sheet_3/.test(m.text)).length, 1, 'app tells the team once');
+  await settingsLib.set('page_confirmation_sender', 'app', null);
+});
+
+test('refund made in the Razorpay dashboard (refund.processed webhook) updates the order and ends access once, even if delivered twice', async () => {
+  const send = (event, payload, id) => {
+    const body = JSON.stringify({ event, payload, created_at: Date.now() });
+    const sig = crypto.createHmac('sha256', 'whsec-test').update(body).digest('hex');
+    return fetch(`${BASE}/api/webhooks/razorpay`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': sig, 'X-Razorpay-Event-Id': id } });
+  };
+  const products = (await admin.get('/api/admin/products')).json;
+  const svc = products.find((x) => x.public_key === '500mba');
+  const plan = products.find((x) => x.kind === 'subscription_plan' && x.active);
+  assert.ok(plan, 'a subscription plan exists in the test data');
+  // a paid service (page payment), then a partial and a full refund from the dashboard
+  const pay = { id: 'pay_rf_1', order_id: null, amount: svc.price_paise, status: 'captured', method: 'card', email: 'refund.me@buyers.test', contact: '+919800000009', notes: { plan: svc.name } };
+  await send('payment.captured', { payment: { entity: pay } }, 'evt_rf_pay');
+  await jobs.processDue({ kinds: ['payments.webhook'], limit: 20 });
+  const o = await db.one("select o.* from anvaya.orders o join anvaya.students s on s.id = o.student_id where s.email = 'refund.me@buyers.test'");
+  assert.equal(o.status, 'paid');
+  const part = { id: 'rfnd_rf_part', payment_id: 'pay_rf_1', amount: 10000, status: 'processed' };
+  await send('refund.processed', { refund: { entity: part }, payment: { entity: pay } }, 'evt_rf_part');
+  await send('refund.processed', { refund: { entity: part }, payment: { entity: pay } }, 'evt_rf_part_again'); // re-delivered under a new id
+  await jobs.processDue({ kinds: ['payments.webhook'], limit: 20 });
+  assert.equal((await db.one('select status from anvaya.orders where id = $1', [o.id])).status, 'partially_refunded');
+  assert.equal(Number((await db.one('select count(*) n from anvaya.refunds r join anvaya.payments p on p.id = r.payment_id where p.order_id = $1', [o.id])).n), 1, 'counted once');
+  assert.equal((await db.one('select status from anvaya.service_cases where order_id = $1', [o.id])).status, 'intake', 'partial refund keeps the service open');
+  await send('refund.processed', { refund: { entity: { id: 'rfnd_rf_rest', payment_id: 'pay_rf_1', amount: svc.price_paise - 10000, status: 'processed' } }, payment: { entity: pay } }, 'evt_rf_rest');
+  await jobs.processDue({ kinds: ['payments.webhook'], limit: 20 });
+  assert.equal((await db.one('select status from anvaya.orders where id = $1', [o.id])).status, 'refunded');
+  assert.equal((await db.one("select status from anvaya.payments where provider_payment_id = 'pay_rf_1'")).status, 'refunded');
+  assert.equal((await db.one('select status from anvaya.service_cases where order_id = $1', [o.id])).status, 'cancelled', 'full refund closes the service');
+  // a subscription bought and fully refunded loses access straight away
+  const st = await db.one("select id from anvaya.students where email = 'refund.me@buyers.test'");
+  const so = await payments.createOrder({ studentId: st.id, product: plan, amountPaise: plan.price_paise, description: plan.name, userId: null });
+  await payments.markPaid(so.id, { provider: 'razorpay', providerPaymentId: 'pay_rf_sub', amountPaise: plan.price_paise });
+  const subs = require('../src/lib/subscriptions');
+  const sub = () => db.one('select * from anvaya.subscriptions where last_order_id = $1', [so.id]);
+  assert.equal(subs.effectiveAccess(await sub()), 'active');
+  await send('refund.processed', { refund: { entity: { id: 'rfnd_rf_sub', payment_id: 'pay_rf_sub', amount: plan.price_paise, status: 'processed' } } }, 'evt_rf_sub');
+  await jobs.processDue({ kinds: ['payments.webhook'], limit: 20 });
+  assert.equal(subs.effectiveAccess(await sub()), 'cancelled');
+  assert.equal((await sub()).billing_status, 'refunded');
 });
 
 // ═══ Session lifecycle: requests, calendar, cutoff, no-shows ═══════════════
@@ -1084,18 +1244,40 @@ test('calendar: no Meet link means no confirmation; failure shown to staff and r
   ids.calBooking = bid;
 });
 
-test('two-hour cutoff: self-service reschedule/cancel stops inside 2 h; staff can still act', async () => {
+test('reschedule policy: 24 hours’ notice, once per plan (student moves only); late changes go to the team; staff can still act', async () => {
   const bid = ids.calBooking;
-  await db.run("update anvaya.bookings set scheduled_at = now() + interval '90 minutes' where id = $1", [bid]);
+  // inside 24 hours: no online reschedule or cancel, only a request to the team
+  await db.run("update anvaya.bookings set scheduled_at = now() + interval '20 hours', ends_at = now() + interval '20 hours 45 minutes' where id = $1", [bid]);
   const later = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json.at(-2);
   const rs = await stu2.post(`/api/student/bookings/${bid}/reschedule`, { scheduled_at: later });
-  assert.equal(rs.status, 400); assert.match(rs.json.error, /within 2 hours/);
+  assert.equal(rs.status, 400); assert.match(rs.json.error, /within 24 hours/); assert.match(rs.json.error, /counts as used/);
   const cn = await stu2.post(`/api/student/bookings/${bid}/cancel`);
   assert.equal(cn.status, 400); assert.match(cn.json.error, /support request/);
-  const home = (await stu2.get('/api/student/home')).json.sessions.bookings.find((x) => x.id === bid);
+  let home = (await stu2.get('/api/student/home')).json.sessions.bookings.find((x) => x.id === bid);
   assert.equal(home.can_reschedule, false); assert.equal(home.needs_exception, true);
-  await db.run("update anvaya.bookings set scheduled_at = now() + interval '3 hours' where id = $1", [bid]);
-  assert.equal((await stu2.get('/api/student/home')).json.sessions.bookings.find((x) => x.id === bid).can_reschedule, true, 'allowed again outside 2 h');
+  // outside 24 hours, but this booking was already moved once by the student (calendar test): the one reschedule is used
+  await db.run("update anvaya.bookings set scheduled_at = now() + interval '3 days', ends_at = now() + interval '3 days 45 minutes' where id = $1", [bid]);
+  assert.equal(Number((await db.one('select student_reschedule_count n from anvaya.bookings where id = $1', [bid])).n), 1);
+  home = (await stu2.get('/api/student/home')).json.sessions.bookings.find((x) => x.id === bid);
+  assert.equal(home.can_reschedule, false); assert.equal(home.reschedule_used, true);
+  const again = await stu2.post(`/api/student/bookings/${bid}/reschedule`, { scheduled_at: later });
+  assert.equal(again.status, 400); assert.match(again.json.error, /already used the one reschedule/);
+  // with the allowance unused, one move is allowed and then the time is final
+  await db.run('update anvaya.bookings set student_reschedule_count = 0 where id = $1', [bid]);
+  assert.equal((await stu2.get('/api/student/home')).json.sessions.bookings.find((x) => x.id === bid).can_reschedule, true);
+  const slots = (await stu2.get(`/api/student/mentors/${ids.mentorA}/slots`)).json;
+  const ok = await stu2.post(`/api/student/bookings/${bid}/reschedule`, { scheduled_at: slots.at(-3) });
+  assert.equal(ok.status, 200, ok.text);
+  assert.equal((await stu2.post(`/api/student/bookings/${bid}/reschedule`, { scheduled_at: slots.at(-4) })).status, 400, 'second move refused');
+  // sessions in the same order share the one reschedule (a plan with several sessions)
+  const orderId = (await db.one('select id from anvaya.orders order by id limit 1')).id;
+  await db.run('update anvaya.bookings set order_id = $2, student_reschedule_count = 0 where id = $1', [bid, orderId]);
+  const other = await db.one('select id, order_id, student_reschedule_count from anvaya.bookings where id <> $1 order by id limit 1', [bid]);
+  await db.run('update anvaya.bookings set order_id = $2, student_reschedule_count = 1 where id = $1', [other.id, orderId]);
+  const sharedTry = await stu2.post(`/api/student/bookings/${bid}/reschedule`, { scheduled_at: slots.at(-4) });
+  assert.equal(sharedTry.status, 400, 'another session of the same plan already used it'); assert.match(sharedTry.json.error, /already used/);
+  await db.run('update anvaya.bookings set order_id = $2, student_reschedule_count = $3 where id = $1', [other.id, other.order_id, other.student_reschedule_count]);
+  await db.run('update anvaya.bookings set order_id = null where id = $1', [bid]);
 });
 
 test('no-show: only after the grace period, blocks every new booking/request, keeps existing access, dispute → admin reversal restores access', async () => {
@@ -1322,4 +1504,134 @@ test('brute-force logins are rate limited', async () => {
   const c = new Client(); let last;
   for (let i = 0; i < 11; i++) last = await c.post('/api/auth/login', { email: 'ratelimit@anvaya.test', password: 'nope' });
   assert.equal(last.status, 429);
+});
+
+test('cron status: read-only queue and payment set-up, secret required, no secret values', async () => {
+  assert.equal((await fetch(`${BASE}/api/cron/status`)).status, 401);
+  const r = await fetch(`${BASE}/api/cron/status`, { headers: { Authorization: 'Bearer cron-test-secret' } });
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.ok(j.migrations.includes('0011_gateway_payments_page.sql'));
+  assert.equal(j.paymentSheet.token, true); assert.equal(j.paymentSheet.url, true);
+  assert.ok(Array.isArray(j.queue));
+  assert.ok(!JSON.stringify(j).includes('sheet-token') && !JSON.stringify(j).includes('whsec-test'));
+});
+
+test('checkout enquiries: saved before payment, closed ≠ failed, abandoned after 30 min, consent-only reminders re-checked, converted once, CRM + daily summary', async () => {
+  Object.assign(process.env, { ENQUIRY_ABANDON_MS: '0', ENQUIRY_RECOVERY1_MS: '0', ENQUIRY_RECOVERY2_MS: '0' });
+  for (const [key, kind, name, rs] of [['1500', 'coaching_package', 'Portfolio Roadmap & Diagnosis', 1500], ['2250', 'resume_service', 'Complete Resume Build & Rewrite', 2250],
+    ['3999', 'coaching_package', 'The Full Picture — Profile Strategy + Resume', 3999], ['4500', 'coaching_package', 'Guesstimate Readiness Programme', 4500]]) {
+    const r = await admin.post('/api/admin/products', { kind, name, price_paise: rupees(rs), active: true, public_key: key });
+    assert.ok([200, 201].includes(r.status), r.text);
+  }
+  const anon = new Client();
+  const hook = (event, entity, id) => {
+    const body = JSON.stringify({ event, payload: { payment: { entity } }, created_at: Date.now() });
+    const sig = crypto.createHmac('sha256', 'whsec-test').update(body).digest('hex');
+    return fetch(`${BASE}/api/webhooks/razorpay`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': sig, 'X-Razorpay-Event-Id': id } });
+  };
+  const run = async () => { for (let i = 0; i < 6; i++) if (!(await jobs.processDue({ kinds: ['enquiries.check_abandon', 'enquiries.recover', 'enquiries.sheet_sync', 'email.send', 'payments.webhook', 'paysheet.sync'], limit: 100 })).length) break; }; // like the cron: drain until idle
+  const enq = (email) => db.one('select * from anvaya.checkout_enquiries where email = $1', [email]);
+  // CORS from the brochure host
+  const pre = await fetch(`${BASE}/api/public/checkout/enquiry`, { method: 'OPTIONS', headers: { Origin: 'https://anvayacareers.in', 'Access-Control-Request-Method': 'POST' } });
+  assert.equal(pre.status, 204);
+  // details submitted + checkout opened (twice: same enquiry, no new row), with consent and a referral
+  const a1 = await anon.post('/api/public/checkout/enquiry', { name: 'Kabir Rao', email: 'Kabir@Buyers.test', phone: '+91 98000 11111', plan_key: '500mba', ref_code: 'FRIEND10', consent: true });
+  assert.equal(a1.status, 201, a1.text);
+  const a2 = await anon.post('/api/public/checkout/enquiry', { name: 'Kabir Rao', email: 'kabir@buyers.test', phone: '+91 98000 11111', plan_key: '500mba', ref_code: 'FRIEND10', consent: true, enquiry_id: a1.json.id });
+  assert.equal(a2.json.id, a1.json.id);
+  let e = await enq('kabir@buyers.test');
+  assert.equal(e.attempts, 2); assert.equal(e.status, 'started'); assert.equal(Number(e.amount_paise), 45000, 'server price with referral');
+  assert.equal(Number((await db.one("select count(*) n from anvaya.checkout_enquiries where email = 'kabir@buyers.test'")).n), 1);
+  // closing the checkout window is an event, not a failure
+  assert.equal((await anon.post(`/api/public/checkout/enquiry/${a1.json.id}/event`, { event: 'closed' })).status, 204);
+  e = await enq('kabir@buyers.test'); assert.equal(e.status, 'started'); assert.equal(e.closed_count, 1);
+  await run();
+  assert.equal(enqRows.get(a1.json.id).status, 'Abandoned (no payment after 30 min)', 'one Sheet row, updated in place');
+  e = await enq('kabir@buyers.test'); assert.equal(e.status, 'abandoned');
+  // reminder 1 sent once, with a resume link at the current price; reminder 2 also due here (0 ms) — exactly one each
+  const kabir = () => mailer.sent.filter((m) => m.to === 'kabir@buyers.test' && /almost done|Still thinking/.test(m.subject));
+  assert.equal(kabir().length, 2);
+  assert.match(kabir()[0].text, /anvaya-payment\.html\?plan=500mba&ref=FRIEND10/); assert.match(kabir()[0].text, /₹450/); assert.match(kabir()[0].text, /stop\?t=/);
+  await run(); await jobs.runNow(await jobs.enqueue('enquiries.resync', {}, { dedupeKey: `t-enq-resync-${Date.now()}` })); await run();
+  assert.equal(kabir().length, 2, 'no repeats on retries');
+  assert.match(enqRows.get(a1.json.id).follow_up, /Agreed · email 1: sent · email 2: sent/);
+  // the verified payment converts it (notes.enquiry), in Supabase and the Sheet
+  await hook('payment.captured', { id: 'pay_enq_1', order_id: null, amount: 45000, status: 'captured', method: 'upi', email: 'kabir@buyers.test', contact: '+919800011111', notes: { plan: 'MBA Planning & Strategy Call', enquiry: a1.json.id } }, 'evt_enq_1');
+  await run();
+  e = await enq('kabir@buyers.test'); assert.equal(e.status, 'converted'); assert.equal(e.provider_payment_id, 'pay_enq_1'); assert.ok(e.order_id);
+  assert.match(enqRows.get(a1.json.id).status, /^Converted \(paid, pay_enq_1\)/);
+
+  // no consent: abandoned, never emailed
+  const b = await anon.post('/api/public/checkout/enquiry', { name: 'Meera N', email: 'meera.n@buyers.test', phone: '9800022222', plan_key: '1500', consent: false });
+  await run();
+  assert.equal((await enq('meera.n@buyers.test')).status, 'abandoned');
+  assert.equal(mailer.sent.filter((m) => m.to === 'meera.n@buyers.test').length, 0);
+  assert.match(enqRows.get(b.json.id).follow_up, /not agreed/);
+
+  // Razorpay's signed payment.failed marks it failed (the browser's own report does not)
+  const c = await anon.post('/api/public/checkout/enquiry', { name: 'Tara S', email: 'tara@buyers.test', phone: '9800033333', plan_key: '2250', consent: true });
+  process.env.ENQUIRY_ABANDON_MS = String(3600e3); // keep it "started" while we look
+  await anon.post(`/api/public/checkout/enquiry/${c.json.id}/event`, { event: 'browser_failed' });
+  assert.equal((await enq('tara@buyers.test')).status, 'started', 'browser report alone is not a failure');
+  process.env.ENQUIRY_RECOVERY1_MS = String(3600e3); process.env.ENQUIRY_RECOVERY2_MS = String(86400e3);
+  await hook('payment.failed', { id: 'pay_enq_fail', order_id: null, amount: 225000, status: 'failed', method: 'card', email: 'tara@buyers.test', error_description: 'Bank declined', notes: { plan: 'Complete Resume Build & Rewrite', enquiry: c.json.id } }, 'evt_enq_fail');
+  await run();
+  let t = await enq('tara@buyers.test'); assert.equal(t.status, 'failed'); assert.equal(t.failure_reason, 'Bank declined');
+  assert.match(enqRows.get(c.json.id).status, /^Payment failed: Bank declined/);
+  // she pays before the reminder is due: the reminder is cancelled, and a re-check would skip it anyway
+  await hook('payment.captured', { id: 'pay_enq_2', order_id: null, amount: 225000, status: 'captured', method: 'card', email: 'tara@buyers.test', notes: { plan: 'Complete Resume Build & Rewrite' } }, 'evt_enq_2');
+  await run();
+  t = await enq('tara@buyers.test'); assert.equal(t.status, 'converted');
+  assert.equal(Number((await db.one("select count(*) n from anvaya.jobs where kind = 'enquiries.recover' and payload->>'id' = $1 and status = 'cancelled'", [String(t.id)])).n), 2);
+  // re-check before sending: a verified payment recorded another way also stops a reminder
+  process.env.ENQUIRY_RECOVERY1_MS = '0'; process.env.ENQUIRY_RECOVERY2_MS = '0'; process.env.ENQUIRY_ABANDON_MS = '0';
+  const dd = await anon.post('/api/public/checkout/enquiry', { name: 'Dev P', email: 'dev.p@buyers.test', phone: '9800044444', plan_key: '4500', consent: true });
+  await db.run(`insert into anvaya.gateway_payments (provider_payment_id, email, plan, amount_paise, status, occurred_at) values ('pay_other_way', 'dev.p@buyers.test', 'Guesstimate Readiness Programme', 450000, 'paid', now())`);
+  await run();
+  assert.equal((await enq('dev.p@buyers.test')).status, 'converted');
+  assert.equal(mailer.sent.filter((m) => m.to === 'dev.p@buyers.test').length, 0, 'never reminded after paying');
+  assert.ok(dd.json.id);
+
+  // unsubscribe link
+  const enquiriesLib = require('../src/lib/enquiries');
+  const z = await anon.post('/api/public/checkout/enquiry', { name: 'Zoya', email: 'zoya@buyers.test', phone: '9800055555', plan_key: '3999', consent: true });
+  const bad = await fetch(`${BASE}/api/public/checkout/enquiry/${z.json.id}/stop?t=nope`); assert.equal(bad.status, 404);
+  const ok = await fetch(`${BASE}/api/public/checkout/enquiry/${z.json.id}/stop?t=${enquiriesLib.stopToken(z.json.id)}`); assert.equal(ok.status, 200);
+  await run();
+  assert.equal(mailer.sent.filter((m) => m.to === 'zoya@buyers.test').length, 0);
+
+  // CRM view (staff only) and the daily summary, sent once per day
+  assert.equal((await anon.get('/api/admin/checkout-enquiries')).status, 401);
+  const crm = await admin.get('/api/admin/checkout-enquiries');
+  assert.equal(crm.status, 200); assert.ok(crm.json.stats.converted >= 3); assert.ok(crm.json.rows.some((r) => r.follow_up.includes('email 1')));
+  const day = '2099-01-01';
+  for (let i = 0; i < 2; i++) { await jobs.enqueue('enquiries.daily_summary', { day }, { dedupeKey: `enq-summary-job:${day}` }); await jobs.processDue({ kinds: ['enquiries.daily_summary', 'email.send'], limit: 10 }); }
+  const sums = mailer.sent.filter((m) => m.to === 'team@anvaya.test' && m.subject.startsWith('Checkouts 2099-01-01:'));
+  assert.equal(sums.length, 1); assert.match(sums[0].text, /Converted \(paid\): \d/);
+  for (const k of ['ENQUIRY_ABANDON_MS', 'ENQUIRY_RECOVERY1_MS', 'ENQUIRY_RECOVERY2_MS']) delete process.env[k];
+});
+
+test('visit sources: link clicks, free chats and checkouts carry the ?src code; the CRM report and Leads filter use it', async () => {
+  const anon = new Client();
+  await db.run('delete from anvaya.rate_limits'); // earlier tests used up the free-chat form's hourly allowance
+  for (let i = 0; i < 3; i++) assert.equal((await anon.post('/api/public/ref-visit', { src: 'SRCC-Consulting-Club' })).status, 204);
+  await anon.post('/api/public/ref-visit', { src: '<script>' }); // cleaned to "script"
+  const lead = await anon.post('/api/public/leads', { name: 'Ira Club', phone: '+91 98700 12345', situation: 'Applying but not hearing back', src: 'srcc-consulting-club', src_first: 'insta-reel-oct' });
+  assert.equal(lead.status, 201, lead.text);
+  const l = await db.one('select ref_source, ref_first from anvaya.leads where id = $1', [lead.json.id]);
+  assert.deepEqual([l.ref_source, l.ref_first], ['srcc-consulting-club', 'insta-reel-oct']);
+  const e = await anon.post('/api/public/checkout/enquiry', { name: 'Ira Club', email: 'ira.club@buyers.test', phone: '9870012345', plan_key: '2250', consent: false, src: 'srcc-consulting-club', src_first: 'insta-reel-oct', entry: 'quiz' });
+  assert.equal(e.status, 201, e.text);
+  const body = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { id: 'pay_src_1', order_id: null, amount: 225000, status: 'captured', method: 'upi', email: 'ira.club@buyers.test', notes: { plan: 'Complete Resume Build & Rewrite', enquiry: e.json.id } } } }, created_at: Date.now() });
+  await fetch(`${BASE}/api/webhooks/razorpay`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': crypto.createHmac('sha256', 'whsec-test').update(body).digest('hex'), 'X-Razorpay-Event-Id': 'evt_src_1' } });
+  await jobs.processDue({ kinds: ['payments.webhook', 'enquiries.sheet_sync', 'paysheet.sync', 'email.send'], limit: 50 });
+  assert.equal((await anon.get('/api/admin/sources')).status, 401);
+  const rep = await admin.get('/api/admin/sources?days=30');
+  const row = rep.json.find((r) => r.source === 'srcc-consulting-club');
+  assert.deepEqual([row.clicks, row.free_chats, row.checkouts, row.paid, Number(row.paid_paise), row.via_quiz], [3, 1, 1, 1, 225000, 1]);
+  assert.ok(rep.json.some((r) => r.source === 'script'), 'codes are cleaned, not rejected');
+  const filtered = await admin.get('/api/admin/leads-table?source=srcc');
+  assert.equal(filtered.status, 200, filtered.text);
+  assert.ok((filtered.json.rows || filtered.json).some((x) => x.ref_source === 'srcc-consulting-club'));
 });

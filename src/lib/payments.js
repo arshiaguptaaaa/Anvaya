@@ -9,6 +9,8 @@ const jobs = require('./jobs');
 const { sendEmail } = require('./email');
 const subs = require('./subscriptions');
 const ledger = require('./ledger');
+const paysheet = require('./paysheet');
+const enquiries = require('./enquiries');
 
 const KEY_ID = process.env.RAZORPAY_KEY_ID || '';
 const KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
@@ -34,6 +36,7 @@ async function rzp(method, pathname, body) {
 }
 function fakeRzp(method, p, body) {
   if (method === 'POST' && p === '/orders') { const o = { id: `order_fake_${++fake.seq}`, amount: body.amount, currency: body.currency, status: 'created' }; fake.orders.set(o.id, o); return o; }
+  if (method === 'GET' && p.startsWith('/payments?')) return { items: [...fake.payments.values()] };
   let m = p.match(/^\/orders\/([^/]+)\/payments$/);
   if (m) return { items: [...fake.payments.values()].filter((x) => x.order_id === m[1]) };
   m = p.match(/^\/payments\/([^/]+)\/refund$/);
@@ -99,6 +102,8 @@ async function afterPayment(orderId, { provider }) {
     const o = await db.one(`select o.*, p.kind as product_kind, p.name as product_name, s.name as student_name, s.email, s.user_id, s.owner_user_id,
         s.intake_completed_at from anvaya.orders o left join anvaya.products p on p.id = o.product_id join anvaya.students s on s.id = o.student_id where o.id = $1`, [orderId]);
     if (!o || o.status !== 'paid') return;
+    if (provider === 'razorpay') await paysheet.fromOrder(o.id).catch((e) => console.error('[paysheet]', orderId, e.message));
+    if (provider === 'razorpay') await enquiries.convertForOrder(o.id).catch((e) => console.error('[enquiry]', orderId, e.message));
     const first = await db.one(`insert into anvaya.tasks (title, student_id, owner_user_id, due_at, source, dedupe_key)
       values ($1,$2,$3, now() + interval '1 day', 'payment', $4) on conflict (dedupe_key) do nothing returning id`,
     [`Welcome call: ${o.product_name || o.description}`, o.student_id, o.owner_user_id, `onboard:order:${o.id}`]);
@@ -126,8 +131,11 @@ async function afterPayment(orderId, { provider }) {
       }
     }
     let emailNote = 'no email on file';
-    if (o.email) {
-      const r = await sendEmail(o.email, 'payment_confirmed', { item: o.product_name || o.description, validTill: sub?.paid_through || null, nextStep: next,
+    const scriptSends = o.source === 'public_page_direct' && (await require('./settings').get('page_confirmation_sender')) !== 'app';
+    if (scriptSends) emailNote = 'confirmation email sent by the payment page’s Apps Script';
+    else if (o.email) {
+      const bookingUrl = /^public_page/.test(o.source || '') ? ((await require('./settings').get('page_booking_links')) || {})[o.product_name] || null : null;
+      const r = await sendEmail(o.email, 'payment_confirmed', { item: o.product_name || o.description, validTill: sub?.paid_through || null, nextStep: next, bookingUrl,
         dashboardUrl: `${BASE_URL()}/student` }, { dedupeKey: `paid:order:${o.id}` });
       emailNote = r.delivered ? 'confirmation email delivered' : 'confirmation email queued for retry';
     }
@@ -136,6 +144,23 @@ async function afterPayment(orderId, { provider }) {
   } catch (e) {
     console.error('[after-payment]', orderId, e.message); // never undo a recorded payment; the welcome task shows it needs a look
   }
+}
+
+/**
+ * A payment-page purchase the page itself never reported (the browser closed before its success step), so the page's
+ * Apps Script sent no confirmation. Sends the app's confirmation instead, once per order (same key as afterPayment).
+ */
+async function confirmPagePayment(orderId) {
+  const o = await db.one(`select o.*, p.name as product_name, s.email, u.password_hash is null as needs_setup from anvaya.orders o
+    left join anvaya.products p on p.id = o.product_id join anvaya.students s on s.id = o.student_id left join anvaya.users u on u.id = s.user_id
+    where o.id = $1 and o.status in ('paid','partially_refunded')`, [orderId]);
+  if (!o || !o.email) return null;
+  const bookingUrl = ((await require('./settings').get('page_booking_links')) || {})[o.product_name] || null;
+  const r = await sendEmail(o.email, 'payment_confirmed', { item: o.product_name || o.description, nextStep: o.needs_setup
+    ? 'check your inbox for a separate email to set up your account, then complete a short intake.' : 'open your dashboard to see what’s included.',
+  bookingUrl, dashboardUrl: `${BASE_URL()}/student` }, { dedupeKey: `paid:order:${o.id}` });
+  await require('./ops').systemEvent(o.student_id, `Payment page didn’t report this payment, so the app sent the confirmation email${r.delivered ? '' : ' (queued for retry)'}.`);
+  return r;
 }
 
 /** Applies what was bought. Returns post-commit callbacks (emails). */
@@ -197,10 +222,25 @@ async function refund(paymentId, { amountPaise, reason = '', cancelBooking = tru
     const r = await rzp('POST', `/payments/${pay.provider_payment_id}/refund`, { amount: amountPaise, notes: { reason } });
     providerRefundId = r.id;
   }
+  const id = await applyRefund(paymentId, { amountPaise, reason, providerRefundId, cancelBooking, userId });
+  await paysheet.fromPayment(paymentId).catch((e) => console.error('[paysheet] refund', paymentId, e.message));
+  return id;
+}
+
+/**
+ * Records a refund once (per gateway refund id) and updates what it affects: payment and order status, the booking,
+ * and access. A full refund ends what was bought (subscription access, an open service case); a partial refund keeps
+ * access and leaves the decision to staff. Used by admin refunds and by Razorpay's refund.processed webhook
+ * (refunds made from the Razorpay dashboard), whichever arrives first.
+ */
+async function applyRefund(paymentId, { amountPaise, reason = '', providerRefundId = null, cancelBooking = true, userId = null }) {
   return db.tx(async (t) => {
+    const pay = await t.one('select * from anvaya.payments where id = $1 for update', [paymentId]);
     const ref = await t.one(`insert into anvaya.refunds (payment_id, amount_paise, reason, status, provider_refund_id, created_by)
       values ($1,$2,$3,'processed',$4,$5) on conflict (provider_refund_id) do nothing returning id`, [paymentId, amountPaise, reason, providerRefundId, userId]);
-    const total = refunded + amountPaise;
+    if (!ref) return (await t.one('select id from anvaya.refunds where provider_refund_id = $1', [providerRefundId]))?.id; // already applied
+    const total = (await t.one("select coalesce(sum(amount_paise),0) n from anvaya.refunds where payment_id = $1 and status <> 'failed'", [paymentId])).n;
+    const full = total >= pay.amount_paise;
     await t.run("update anvaya.payments set status = case when $2::bigint >= amount_paise then 'refunded' else status end where id = $1", [paymentId, total]);
     if (pay.order_id) {
       await t.run(`update anvaya.orders set status = case when $2::bigint >= amount_paise then 'refunded' else 'partially_refunded' end where id = $1`, [pay.order_id, total]);
@@ -211,10 +251,16 @@ async function refund(paymentId, { amountPaise, reason = '', cancelBooking = tru
           await t.run("update anvaya.bookings set status = 'cancelled', cancelled_at = now(), cancel_reason = $2 where id = $1", [b.id, `Refunded: ${reason}`]);
         }
       }
-      const sub = await t.one('select id from anvaya.subscriptions where last_order_id = $1', [pay.order_id]);
-      if (sub && total >= pay.amount_paise) await t.run("update anvaya.subscriptions set billing_status = 'refunded', updated_at = now() where id = $1", [sub.id]);
+      if (full) {
+        await t.run(`update anvaya.subscriptions set billing_status = 'refunded', access_status = 'cancelled', cancelled_at = now(), cancel_at_period_end = false,
+          updated_at = now() where last_order_id = $1`, [pay.order_id]);
+        const cases = await t.all(`update anvaya.service_cases set status = 'cancelled' where order_id = $1 and status not in ('delivered','closed','cancelled') returning id, status`, [pay.order_id]);
+        for (const c of cases) await t.run("insert into anvaya.case_events (case_id, user_id, to_status, note) values ($1,$2,'cancelled','Order fully refunded')", [c.id, userId]);
+      }
+      await t.run("insert into anvaya.audit_log (user_id, action, detail) values ($1, 'refund_applied', $2)",
+        [userId, `payment:${paymentId} order:${pay.order_id} refund:${providerRefundId || ref.id} amount:${amountPaise} total:${total}${full ? ' full' : ' partial'}`]);
     }
-    return ref?.id;
+    return ref.id;
   });
 }
 
@@ -243,14 +289,17 @@ jobs.register('payments.webhook', async ({ webhookEventId }) => {
       const order = pay.order_id && await db.one("select * from anvaya.orders where provider = 'razorpay' and provider_order_id = $1", [pay.order_id]);
       if (order) await markPaid(order.id, { provider: 'razorpay', providerPaymentId: pay.id, amountPaise: pay.amount, feePaise: pay.fee || 0, taxPaise: pay.tax || 0, method: pay.method || '' });
       else if (p.event === 'payment.captured') await recordPagePayment(pay);
-    } else if (p.event === 'payment.failed' && pay?.order_id) {
-      const order = await db.one("select id from anvaya.orders where provider = 'razorpay' and provider_order_id = $1", [pay.order_id]);
+    } else if (p.event === 'payment.failed' && pay?.id) {
+      const order = pay.order_id && await db.one("select id from anvaya.orders where provider = 'razorpay' and provider_order_id = $1", [pay.order_id]);
       if (order) await markFailed(order.id, pay.error_description || 'Payment failed');
+      await paysheet.fromFailedAttempt(pay);
+      await enquiries.failedFromPayment(pay); // only Razorpay's signed event marks an enquiry failed
     } else if (p.event === 'refund.processed') {
       const rf = p.payload?.refund?.entity;
       const payment = rf && await db.one("select id from anvaya.payments where provider = 'razorpay' and provider_payment_id = $1", [rf.payment_id]);
-      if (payment && !(await db.one('select 1 from anvaya.refunds where provider_refund_id = $1', [rf.id]))) {
-        await db.run(`insert into anvaya.refunds (payment_id, amount_paise, reason, status, provider_refund_id) values ($1,$2,'Refund from gateway','processed',$3) on conflict do nothing`, [payment.id, rf.amount, rf.id]);
+      if (payment) {
+        await applyRefund(payment.id, { amountPaise: rf.amount, reason: 'Refunded in Razorpay', providerRefundId: rf.id });
+        await paysheet.fromPayment(payment.id);
       }
     }
     await db.run("update anvaya.webhook_events set status = 'processed', processed_at = now(), error = null where id = $1", [ev.id]);
@@ -290,6 +339,7 @@ async function recordPagePayment(pay) {
     [st.id, product.id, product.name, pay.amount, pay.order_id || null, Math.max(0, Number(product.price_paise) - Number(pay.amount))]);
   });
   await markPaid(order.id, { provider: 'razorpay', providerPaymentId: pay.id, amountPaise: pay.amount, feePaise: pay.fee || 0, taxPaise: pay.tax || 0, method: pay.method || '' });
+  await enquiries.convert({ publicId: pay.notes?.enquiry || null, email, planName: product.name, providerPaymentId: pay.id, orderId: order.id }).catch((e) => console.error('[enquiry]', pay.id, e.message));
 }
 
 /** Reconciles orders whose outcome we never heard about (missed webhook, closed tab). */
@@ -306,4 +356,4 @@ jobs.register('payments.reconcile', async () => {
   return { checked: stale.length, resolved };
 });
 
-module.exports = { afterPayment, configured, checkoutConfig, createOrder, verifyCheckoutSignature, verifyWebhookSignature, markPaid, markFailed, refund, handleWebhook, notifyBookingConfirmed, fake, hmac, rzp };
+module.exports = { afterPayment, applyRefund, confirmPagePayment, recordPagePayment, configured, checkoutConfig, createOrder, verifyCheckoutSignature, verifyWebhookSignature, markPaid, markFailed, refund, handleWebhook, notifyBookingConfirmed, fake, hmac, rzp };

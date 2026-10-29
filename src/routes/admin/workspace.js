@@ -207,7 +207,7 @@ r.get('/leads-table', staff, wrap(async (req, res) => {
   const add = (sql, val) => { p.push(val); w.push(sql.replace('?', `$${p.length}`)); };
   if (req.query.q) add("(l.name ilike ? or l.phone ilike ? or coalesce(l.email,'') ilike ?)".replace(/\?/g, () => `$${p.length + 1}`), `%${String(req.query.q).slice(0, 80)}%`);
   if (req.query.status) add('l.status = ?', String(req.query.status));
-  if (req.query.source) add('l.source ilike ?', `%${String(req.query.source).slice(0, 60)}%`);
+  if (req.query.source) add('(l.source ilike ? or l.ref_source ilike ?)'.replace(/\?/g, () => `$${p.length + 1}`), `%${String(req.query.source).slice(0, 60)}%`); // form name or link code
   if (req.query.owner === 'me') add('l.owner_user_id = ?', me(req));
   else if (req.query.owner === 'none') w.push('l.owner_user_id is null');
   else if (req.query.owner) add('l.owner_user_id = ?', v.id(req.query.owner, 'Owner'));
@@ -216,7 +216,7 @@ r.get('/leads-table', staff, wrap(async (req, res) => {
   const { size, offset, page } = paging(req);
   const where = w.join(' and ');
   const total = Number((await db.one(`select count(*) n from anvaya.leads l where ${where}`, p)).n);
-  const rows = await db.all(`select l.id, l.name, l.phone, l.email, l.source, l.status, l.next_action, l.follow_up_at, l.created_at, l.owner_user_id,
+  const rows = await db.all(`select l.id, l.name, l.phone, l.email, l.source, l.ref_source, l.status, l.next_action, l.follow_up_at, l.created_at, l.owner_user_id,
       coalesce(nullif(u.name,''), u.email) as owner_name, (select count(*) from anvaya.tasks t where t.lead_id = l.id and t.status = 'open') as open_tasks
     from anvaya.leads l left join anvaya.users u on u.id = l.owner_user_id where ${where}
     order by ${req.query.sort === 'due' ? 'l.follow_up_at nulls last' : 'l.id desc'} limit ${size} offset ${offset}`, p);

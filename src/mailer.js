@@ -53,8 +53,8 @@ ${ctaUrl ? `<tr><td style="padding:20px 40px 8px;">
 const em = (s) => `<em style="color:#e8c97a;">${s}</em>`;
 const strong = (s) => `<strong style="color:#f4ede0;">${s}</strong>`;
 
-const POLICY_TEXT = 'Rescheduling and cancellation: you can reschedule or cancel online up to 2 hours before the start. Inside 2 hours, message the Anvaya team for an exception. No-show policy: if you miss a confirmed session without notice, the host may record a no-show after the start, which pauses new bookings until the Anvaya team reviews it. You can dispute it from your dashboard.';
-const POLICY_HTML = `<strong style="color:#d9cdb8;">Rescheduling:</strong> reschedule or cancel online up to 2 hours before the start; inside 2 hours, message the Anvaya team for an exception.<br><strong style="color:#d9cdb8;">No-show policy:</strong> if you miss a confirmed session without notice, the host may record a no-show, which pauses new bookings until it's reviewed. You can dispute it from your dashboard.`;
+const POLICY_TEXT = 'Rescheduling: you can reschedule once per plan, at least 24 hours before the session. A session missed or changed with less than 24 hours’ notice counts as used; cancellations by you aren’t refunded. Full policy: https://anvayacareers.in/refund-policy.html\nNo-show policy: if you miss a confirmed session without notice, the host may record a no-show after the start, which pauses new bookings until the Anvaya team reviews it. You can dispute it from your dashboard.';
+const POLICY_HTML = `<strong style="color:#d9cdb8;">Rescheduling:</strong> once per plan, at least 24 hours before the session. A session missed or changed with less than 24 hours’ notice counts as used, and cancellations by you aren’t refunded (<a href="https://anvayacareers.in/refund-policy.html" style="color:#c9a84c;">full policy</a>).<br><strong style="color:#d9cdb8;">No-show policy:</strong> if you miss a confirmed session without notice, the host may record a no-show, which pauses new bookings until it's reviewed. You can dispute it from your dashboard.`;
 const sessionRows = (d) => `<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;color:#d9cdb8;">
   <tr><td style="padding:2px 14px 2px 0;color:#7a6e5e;">Date</td><td>${esc(ist(d.startsAt, { dateStyle: 'full' }))}</td></tr>
   <tr><td style="padding:2px 14px 2px 0;color:#7a6e5e;">Time</td><td>${esc(new Date(d.startsAt).toLocaleString('en-IN', { timeStyle: 'short', timeZone: 'Asia/Kolkata' }))} IST (Asia/Kolkata, GMT+5:30)</td></tr>
@@ -134,11 +134,56 @@ const templates = {
     subject: `Payment received: ${d.item}`,
     html: layout({
       heading: `You’re ${em('all set')}`,
-      bodyHtml: `<p style="margin:0 0 12px;">We’ve received your payment for ${strong(esc(d.item))}${d.validTill ? `. Your access runs until ${strong(esc(ist(d.validTill, { dateStyle: 'medium' })))}` : ''}.</p>${d.setupUrl ? `<p style="margin:0 0 12px;">Next: set up your account and complete a short intake so we can match you to a group and mentor.</p>` : `<p style="margin:0 0 12px;">Next: ${esc(d.nextStep || 'open your dashboard to see what’s included.')}</p>`}`,
+      bodyHtml: `<p style="margin:0 0 12px;">We’ve received your payment for ${strong(esc(d.item))}${d.validTill ? `. Your access runs until ${strong(esc(ist(d.validTill, { dateStyle: 'medium' })))}` : ''}.</p>${d.setupUrl ? `<p style="margin:0 0 12px;">Next: set up your account and complete a short intake so we can match you to a group and mentor.</p>` : `<p style="margin:0 0 12px;">Next: ${esc(d.nextStep || 'open your dashboard to see what’s included.')}</p>`}${d.bookingUrl ? `<p style="margin:0 0 12px;">Pick your session time: <a href="${esc(d.bookingUrl)}" style="color:#c9a84c;">${esc(d.bookingUrl)}</a></p>` : ''}`,
       ctaUrl: d.setupUrl || d.dashboardUrl, ctaLabel: d.setupUrl ? 'Set up your account' : 'Open dashboard',
     }),
-    text: `Payment received for ${d.item}.${d.validTill ? ` Access until ${ist(d.validTill, { dateStyle: 'medium' })}.` : ''} ${d.setupUrl ? `Set up your account: ${d.setupUrl}` : `Open your dashboard: ${d.dashboardUrl}`}\n`,
+    text: `Payment received for ${d.item}.${d.validTill ? ` Access until ${ist(d.validTill, { dateStyle: 'medium' })}.` : ''} ${d.setupUrl ? `Set up your account: ${d.setupUrl}` : `Open your dashboard: ${d.dashboardUrl}`}${d.bookingUrl ? `\nPick your session time: ${d.bookingUrl}` : ''}\n`,
   }),
+  checkout_recovery: (d) => {
+    const plain = (h) => h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    const price = d.available && d.pricePaise != null ? inr(d.pricePaise) : null;
+    const lead = d.step === 1
+      ? (d.failed ? `Your payment for ${strong(esc(d.plan))} didn’t go through, and no money was taken.` : `You started booking ${strong(esc(d.plan))} but didn’t finish checking out.`)
+      : `A last note about ${strong(esc(d.plan))}. We won’t email you about this again.`;
+    const offer = d.available ? `If you’d still like it, you can pick up where you left off${price ? ` at the current price of ${strong(price)}` : ''}.` : 'That plan isn’t offered right now, but our current options are on the same page.';
+    return {
+      subject: d.step === 1 ? `${d.failed ? 'Your payment didn’t go through' : 'You were almost done'}: ${d.plan}` : `Still thinking about ${d.plan}?`,
+      html: layout({
+        heading: d.step === 1 ? `Still ${em('interested')}?` : `One last ${em('note')}`,
+        bodyHtml: `<p style="margin:0 0 12px;">Hi ${esc(d.name)},</p><p style="margin:0 0 12px;">${lead}</p><p style="margin:0 0 12px;">${offer}</p>
+          <p style="margin:0 0 12px;">Not sure it’s the right fit? Reply to this email, or <a href="${esc(d.chatUrl)}" style="color:#c9a84c;">book a free 15-minute chat</a> first.</p>`,
+        ctaUrl: d.resumeUrl, ctaLabel: d.available ? 'Resume my booking' : 'See current options',
+        footnote: `You’re getting this because you asked for a reminder at checkout. <a href="${esc(d.stopUrl)}" style="color:#c9a84c;">Stop these emails</a>.`,
+      }),
+      text: `Hi ${d.name},\n\n${plain(lead)}\n${plain(offer)}\n\nResume: ${d.resumeUrl}\nFree 15-minute chat: ${d.chatUrl}\n\nStop these emails: ${d.stopUrl}\n`,
+    };
+  },
+  team_checkout_summary: (d) => {
+    const row = (x, extra) => `<tr><td style="padding:5px 0;color:#f4ede0;">${esc(x.name || x.email)}<br><span style="color:#9a8d78;font-size:12px;">${esc(x.email)}${x.phone ? ` · ${esc(x.phone)}` : ''}</span></td><td style="padding:5px 8px;color:#d9cdb8;">${esc(x.plan_name)}<br><span style="color:#9a8d78;font-size:12px;">${inr(x.amount_paise)}</span></td><td style="padding:5px 0;color:#d9cdb8;font-size:12px;">${extra(x)}</td></tr>`;
+    const table = (rows, extra) => rows.length ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:13px;">${rows.map((x) => row(x, extra)).join('')}</table>` : '<p style="margin:0 0 12px;color:#9a8d78;">None.</p>';
+    const stats = [['Checkouts started', d.started], ['Payment failed', d.failed], ['Abandoned', d.abandoned], ['Converted (paid)', d.converted], ['Recovered after failing or abandoning', d.recovered], ['Recovery emails sent', d.recoveryEmails]];
+    return {
+      subject: `Checkouts ${d.day}: ${d.converted} paid, ${d.abandoned} abandoned, ${d.failed} failed (last 24h)`,
+      html: layout({ heading: `Checkout ${em('summary')}`, bodyHtml: `<p style="margin:0 0 12px;color:#9a8d78;">${esc(d.day)} · last 24 hours</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;margin-bottom:16px;">${stats.map(([k, v]) => `<tr><td style="padding:4px 0;color:#9a8d78;">${k}</td><td style="padding:4px 0;color:#f4ede0;text-align:right;">${v}</td></tr>`).join('')}</table>
+        <h3 style="font-size:15px;color:#c9a84c;margin:16px 0 6px;">Open (failed or abandoned, last 3 days)</h3>${table(d.open, (x) => `${x.status === 'failed' ? 'Payment failed' : 'Abandoned'}<br>${x.consent ? 'Agreed to reminders' : 'No reminders (not agreed)'}`)}
+        <h3 style="font-size:15px;color:#c9a84c;margin:16px 0 6px;">Converted</h3>${table(d.conv, (x) => ist(x.converted_at))}`,
+      ctaUrl: d.crmUrl, ctaLabel: 'Open in the CRM', footnote: `${d.open_total} open enquir${d.open_total === 1 ? 'y' : 'ies'} in total. Sent once a day by the Anvaya app.` }),
+      text: `${stats.map(([k, v]) => `${k}: ${v}`).join('\n')}\n\nOpen:\n${d.open.map((x) => `- ${x.name} <${x.email}> ${x.phone || ''} · ${x.plan_name} · ${x.status}${x.consent ? '' : ' (no reminders)'}`).join('\n') || 'None'}\n\nConverted:\n${d.conv.map((x) => `- ${x.name} <${x.email}> · ${x.plan_name}`).join('\n') || 'None'}\n\nCRM: ${d.crmUrl}\n`,
+    };
+  },
+  team_payment: (d) => {
+    const what = { paid: 'Payment received', refunded: 'Refunded', partially_refunded: 'Partly refunded' }[d.kind] || 'Payment update';
+    const rows = [['Customer', d.name || '(name on the Sheet)'], ['Email', d.email], ['Phone', d.phone], ['Service', d.plan], ['Amount', inr(d.amountPaise)],
+      ...(d.refundedPaise ? [['Refunded', inr(d.refundedPaise)]] : []), ['Payment ID', d.paymentId], ['Date', ist(d.at)], ['Status', d.kind === 'paid' ? 'Paid, verified by Razorpay' : what]];
+    return {
+      subject: `${what}: ${inr(d.kind === 'paid' ? d.amountPaise : d.refundedPaise)} · ${d.plan} · ${d.name || d.email}`,
+      html: layout({ heading: esc(what), bodyHtml: `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;">${rows.map(([k, v]) =>
+        `<tr><td style="padding:6px 0;color:#9a8d78;width:38%;">${esc(k)}</td><td style="padding:6px 0;color:#f4ede0;">${esc(v || '—')}</td></tr>`).join('')}</table>`,
+      footnote: 'Sent once per payment status by the Anvaya app. The same details are in Supabase and the Bookings tab of the payments Sheet.' }),
+      text: rows.map(([k, v]) => `${k}: ${v || '-'}`).join('\n') + '\n',
+    };
+  },
   session_changed: (d) => ({
     subject: d.cancelled ? `Cancelled: ${d.title} · ${ist(d.previousAt)}` : `Rescheduled: ${d.title} → ${ist(d.startsAt)}`,
     html: layout({

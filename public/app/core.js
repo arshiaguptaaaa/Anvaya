@@ -115,6 +115,7 @@
     not_started: ['Not started', 'off'], in_progress: ['In progress', ''], submitted: ['Submitted', ''], reviewed: ['Reviewed', 'ok'], done: ['Done', 'ok'],
     queued: ['Queued', ''], running: ['Running', ''], dead: ['Dead', 'bad'], succeeded: ['Done', 'ok'], blocked_by_cap: ['Over cap', 'bad'],
     pass: ['Pass', 'ok'], changes_requested: ['Changes', 'bad'],
+    started: ['Checkout started', ''], payment_failed: ['Payment failed', 'bad'], abandoned: ['Abandoned', 'bad'],
   };
   function statusPill(status) {
     const [txt, cls] = PILL[status] || [label(status), ''];

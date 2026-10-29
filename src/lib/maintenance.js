@@ -1,4 +1,6 @@
 'use strict';
+require('./paysheet'); // registers the payment-sheet jobs
+const enquiries = require('./enquiries');
 // Scheduled maintenance jobs (run by Vercel Cron via /api/cron/run, and safe to run any number of times).
 const db = require('../db');
 const jobs = require('./jobs');
@@ -92,6 +94,9 @@ async function schedulePeriodic() {
   await jobs.enqueue('bookings.expire_holds', {}, { dedupeKey: `expire:${hour}:${Math.floor(new Date().getMinutes() / 5)}` });
   await jobs.enqueue('sessions.reminders', {}, { dedupeKey: `reminders:${hour}:${Math.floor(new Date().getMinutes() / 5)}` });
   await jobs.enqueue('payments.reconcile', {}, { dedupeKey: `reconcile:${hour}` });
+  await jobs.enqueue('paysheet.resync', {}, { dedupeKey: `paysheet-resync:${hour}` });
+  await jobs.enqueue('enquiries.resync', {}, { dedupeKey: `enquiries-resync:${hour}` });
+  await enquiries.scheduleDailySummary();
   await jobs.enqueue('subscriptions.daily', {}, { dedupeKey: `subs:${day}` });
   await jobs.enqueue('maintenance.cleanup', {}, { dedupeKey: `cleanup:${day}` });
 }

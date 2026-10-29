@@ -708,11 +708,52 @@
     main.querySelector('[data-test]').addEventListener('click', async () => { try { const r = await api('/api/admin/system/test-email', { method: 'POST', body: {} }); toast(`Test email sent to ${r.to}`); } catch (e) { toast(e.message, true); } });
   }
 
+  // ══ Checkouts (payment-page enquiries) ═══════════════════════════════
+  const ENQ_STATUS = [['started', 'Checkout started'], ['failed', 'Payment failed'], ['abandoned', 'Abandoned'], ['converted', 'Converted']];
+  async function checkouts() {
+    const { rows, stats } = await api('/api/admin/checkout-enquiries');
+    main.innerHTML = pageHead('CRM', 'Checkouts', 'Everyone who entered their details on the payment page and opened checkout. Closing checkout isn’t a failure: “Payment failed” comes only from Razorpay, “Abandoned” means no verified payment 30 minutes after the last attempt, and a verified payment marks it converted.')
+      + `<div class="stats reveal">${stat(stats.started, 'In checkout now')}${stat(stats.abandoned, 'Abandoned (30 days)')}${stat(stats.failed, 'Payment failed (30 days)')}${stat(stats.converted, 'Converted (30 days)')}${stat(stats.recovered, 'Recovered after a drop-off')}</div>`;
+    main.appendChild(tableCard({
+      rows, search: (e) => `${e.name} ${e.email} ${e.phone} ${e.plan_name}`, filter: { key: 'status', options: ENQ_STATUS },
+      columns: [
+        { h: 'Customer', cls: 'strong', render: (e) => `${esc(e.name || '—')}<span class="sub-line">${esc(e.email)}${e.phone ? ` · ${esc(e.phone)}` : ''}</span>` },
+        { h: 'Plan', render: (e) => `${esc(e.plan_name)}<span class="sub-line">${esc(inr(e.amount_paise))}${e.ref_code ? ` · ref ${esc(e.ref_code)}` : ''}</span>` },
+        { h: 'Status', render: (e) => `${statusPill(e.status === 'failed' ? 'payment_failed' : e.status)}${e.status === 'failed' && e.failure_reason ? `<span class="sub-line">${esc(e.failure_reason)}</span>` : ''}${e.provider_payment_id ? `<span class="sub-line">${esc(e.provider_payment_id)}</span>` : ''}` },
+        { h: 'Activity', render: (e) => `${esc(dt(e.last_activity_at))}<span class="sub-line">${e.attempts} attempt${e.attempts === 1 ? '' : 's'}${e.closed_count ? ` · closed ${e.closed_count}×` : ''}</span>` },
+        { h: 'Came from', render: (e) => `${esc(e.ref_source || '—')}${e.ref_first && e.ref_first !== e.ref_source ? `<span class="sub-line">first: ${esc(e.ref_first)}</span>` : ''}${e.entry === 'quiz' ? '<span class="sub-line">via plan finder</span>' : ''}` },
+        { h: 'Reminders', render: (e) => `<span class="small">${esc(e.follow_up)}</span>` },
+        { h: 'Sheet', render: (e) => e.sheet_status === 'synced' ? '<span class="muted small">Synced</span>' : `<span class="small ${e.sheet_status === 'failed' ? 'due' : 'muted'}">${esc(e.sheet_status.replace('_', ' '))}</span>` },
+      ],
+    }));
+    await sourcesCard();
+  }
+
+  // Where enquiries come from (?src= link codes), with a link builder for colleges, posts and campaigns.
+  async function sourcesCard() {
+    const rows = await api('/api/admin/sources?days=90');
+    const card = document.createElement('div'); card.className = 'card reveal mb-3';
+    card.innerHTML = `<div class="card-head"><h2 class="h2">Where enquiries <em>come from</em></h2><span class="muted small">last 90 days</span></div>
+      <p class="sub small">Share links with a code, e.g. <code>anvayacareers.in/?src=srcc-consulting-club</code>. Each click, free chat and checkout is counted against the latest code that person used (kept in their browser for 90 days). “(no code)” is everyone else.</p>
+      <div class="toolbar"><input class="input" data-code placeholder="Code, e.g. srcc-consulting-club or insta-reel-oct" aria-label="Link code"><select class="input" data-page aria-label="Page"><option value="">Homepage</option><option value="anvaya-payment.html">Payment page</option></select><button class="btn btn-primary" data-make>Make link</button></div>
+      <div data-link class="small mb-3"></div>
+      <div class="table-wrap"><table><thead><tr><th>Code</th><th>Link clicks</th><th>Free chats</th><th>Checkouts started</th><th>Paid</th><th>Paid value</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr><td class="strong">${esc(r.source)}</td><td>${r.clicks}</td><td>${r.free_chats}</td><td>${r.checkouts}${r.via_quiz ? `<span class="sub-line">${r.via_quiz} via plan finder</span>` : ''}</td><td>${r.paid}</td><td>${esc(inr(r.paid_paise))}</td></tr>`).join('') : '<tr><td colspan="6"><div class="empty">No tracked visits yet.</div></td></tr>'}</tbody></table></div>`;
+    main.appendChild(card);
+    card.querySelector('[data-make]').addEventListener('click', async () => {
+      const code = card.querySelector('[data-code]').value.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+      const out = card.querySelector('[data-link]');
+      if (!code) { out.textContent = 'Type a short code first.'; return; }
+      const url = `https://anvayacareers.in/${card.querySelector('[data-page]').value}?src=${encodeURIComponent(code)}`;
+      out.innerHTML = `<code>${esc(url)}</code> <button class="link-btn" data-copy>Copy</button>`;
+      out.querySelector('[data-copy]').addEventListener('click', async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { toast('Select the link and copy it', true); } });
+    });
+  }
+
   // ── Router ───────────────────────────────────────────────────────────
   const O = window.AnvayaOps;
   const ctx = () => ({ main, refresh, leadDetail, leadFields, studentFields, studentDetail, isAdmin });
   const views = { today: () => O.today(ctx()), overview, followups, leads: () => O.table(ctx(), 'leads'), students: () => O.table(ctx(), 'students'), support: () => O.support(ctx()),
-    'mentor-services': () => O.serviceApprovals(ctx()), 'leads-classic': leads, 'students-classic': students,
+    'mentor-services': () => O.serviceApprovals(ctx()), 'leads-classic': leads, checkouts, 'students-classic': students,
     mentors, groups, calendar: async () => A.planner(main, { staff: true, isAdmin, settings: await api('/api/admin/settings') }), 'calendar-list': calendar, syllabus, services, subscriptions, catalog, payments, payables, cohorts, reports, team, settings: settingsPage, system };
   let current = 'today';
   async function render(tab = current) {

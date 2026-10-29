@@ -4,12 +4,16 @@
 # file holding them is private (0600) and deleted on exit. Nothing is printed except variable NAMES.
 #   bash scripts/cloudrun-set-secrets.sh                  (all four)
 #   bash scripts/cloudrun-set-secrets.sh RESEND_API_KEY   (only the names given)
+#   SERVICE=anvaya-test bash scripts/cloudrun-set-secrets.sh RAZORPAY_KEY_ID …   (the throwaway test-mode service)
+# Razorpay keys must match the service: anvaya takes rzp_live_ keys only, anvaya-test takes rzp_test_ keys only.
 set -euo pipefail
 G="${GCLOUD:-$HOME/google-cloud-sdk/bin/gcloud}"
-PROJECT=zinc-reason-491008-d0 REGION=us-east1 SERVICE=anvaya
-ALLOWED=" DATABASE_URL SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY RESEND_API_KEY GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET RESEND_WEBHOOK_SECRET "
+PROJECT=zinc-reason-491008-d0 REGION=us-east1 SERVICE="${SERVICE:-anvaya}"
+case "$SERVICE" in anvaya) MODE=live;; anvaya-test) MODE=test;; *) echo "Unknown service: $SERVICE"; exit 1;; esac
+ALLOWED=" DATABASE_URL SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY RESEND_API_KEY GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET RESEND_WEBHOOK_SECRET PAYMENT_SHEET_TOKEN "
 if [ $# -gt 0 ]; then NAMES=("$@"); else NAMES=(DATABASE_URL SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY RESEND_API_KEY); fi
 for N in "${NAMES[@]}"; do [[ "$ALLOWED" == *" $N "* ]] || { echo "Unknown variable: $N"; exit 1; }; done
+[ "$MODE" = test ] && for N in "${NAMES[@]}"; do [[ "$N" == RAZORPAY_* ]] || { echo "The test service takes Razorpay test keys only (not $N)"; exit 1; }; done
 echo "Will update ONLY: ${NAMES[*]} (every other variable is kept as is)"
 
 echo "Account: $("$G" config get-value account 2>/dev/null)   Project: $PROJECT   Service: $SERVICE ($REGION)"
@@ -30,8 +34,9 @@ check() { # name value → error text or empty
     RESEND_API_KEY) [[ "$2" == re_* ]] || echo "should start with re_";;
     GOOGLE_CLIENT_ID) [[ "$2" == *.apps.googleusercontent.com ]] || echo "should end with .apps.googleusercontent.com";;
     GOOGLE_CLIENT_SECRET) [[ "$2" == GOCSPX-* ]] || echo "should start with GOCSPX-";;
-    RAZORPAY_KEY_ID) [[ "$2" == rzp_* ]] || echo "should start with rzp_test_ or rzp_live_";;
+    RAZORPAY_KEY_ID) [[ "$2" == rzp_${MODE}_* ]] || echo "should start with rzp_${MODE}_ for the $SERVICE service";;
     RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET) [ ${#2} -ge 8 ] || echo "looks too short";;
+    PAYMENT_SHEET_TOKEN) [ ${#2} -ge 32 ] || echo "looks too short (copy the whole token from the Apps Script log)";;
   esac
 }
 

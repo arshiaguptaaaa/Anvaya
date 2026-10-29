@@ -8,11 +8,22 @@ const DEFAULTS = {
   booking_min_notice_hours: 12, booking_window_days: 21, commission_percent: 0,
   booking_request_hold_hours: 24,   // how long a requested slot is held while awaiting approval
   booking_payment_hours: 24,        // after approval, time allowed to pay for a paid session
-  reschedule_cutoff_hours: 2,       // students can reschedule/cancel online until this many hours before start
+  reschedule_cutoff_hours: 24,      // students can reschedule (once per plan) or cancel online until this many hours before start
   noshow_grace_minutes: 15,         // the host can confirm a no-show only this long after the start
   calendar_host_user_id: null,      // fallback Google account that hosts events when the mentor isn't connected
   freechat_mentor_id: null,         // host profile whose open slots the website's free-chat form offers (null = no slot picker)
   freechat_minutes: 15,             // length of a free chat
+  // who emails the payment-page customer their confirmation: 'apps_script' (the Sheet's script, as before) or 'app'
+  // (verified by Razorpay, sent once). Exactly one of them should, so the customer gets one confirmation.
+  page_confirmation_sender: 'apps_script',
+  // where a payment-page customer books their session (same links the payment page opens after paying)
+  page_booking_links: {
+    'Portfolio Roadmap & Diagnosis': 'https://calendly.com/teamanvaya-in/anvaya-where-purpose-meets-path-profile-strategy',
+    'Complete Resume Build & Rewrite': 'https://calendly.com/teamanvaya-in/30min',
+    'The Full Picture — Profile Strategy + Resume': 'https://calendly.com/teamanvaya-in/anvaya-where-purpose-meets-path-profile-strategy',
+    'MBA Planning & Strategy Call': 'https://calendly.com/teamanvaya-in/30min',
+    'Guesstimate Readiness Programme': 'https://calendly.com/teamanvaya-in/30min',
+  },
 };
 
 async function all(q = db) {

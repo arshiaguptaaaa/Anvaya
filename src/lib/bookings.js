@@ -155,14 +155,19 @@ async function reschedule({ bookingId, startsAt, byUserId, studentId = null, all
       const iso = new Date(startsAt).toISOString();
       if (iso === new Date(b.scheduled_at).toISOString()) throw new HttpError(400, 'That is already the session time.');
       if (studentId) {
-        const cutoff = Number(await settings.get('reschedule_cutoff_hours', t)) || 2;
-        if (new Date(b.scheduled_at).getTime() - Date.now() < cutoff * 3600e3) throw new HttpError(400, `It’s within ${cutoff} hours of the session, so it can’t be rescheduled online. Raise a support request and the Anvaya team can make an exception.`);
+        const cutoff = Number(await settings.get('reschedule_cutoff_hours', t)) || 24;
+        if (new Date(b.scheduled_at).getTime() - Date.now() < cutoff * 3600e3) throw new HttpError(400, `It’s within ${cutoff} hours of the session, so it can’t be rescheduled online. Under our policy it now counts as used; in a genuine emergency, raise a support request and the Anvaya team will see what they can do.`);
+        // Refund & Rescheduling Policy: one student reschedule per plan (every session bought in the same order counts together).
+        const used = await t.one(`select coalesce(sum(student_reschedule_count), 0)::int as n from anvaya.bookings
+          where id = $1 or ($2::bigint is not null and order_id = $2)`, [b.id, b.order_id]);
+        if (used.n >= 1) throw new HttpError(400, 'You’ve already used the one reschedule included with this plan, so this time is final. In a genuine emergency, raise a support request and the Anvaya team will see what they can do.');
         await require('./sessions').assertCanBook(b.student_id, t);
       }
       if (!allowOutsideAvailability && !isSlot(await slots(b.mentor_id, { q: t, durationMin: b.duration, excludeBookingId: b.id }), iso)) {
         throw new HttpError(409, 'That time is no longer available. Please pick another slot.');
       }
-      await t.run(`update anvaya.bookings set scheduled_at = $2, rescheduled_from = $3, reschedule_count = reschedule_count + 1 where id = $1`, [b.id, iso, b.scheduled_at]);
+      await t.run(`update anvaya.bookings set scheduled_at = $2, rescheduled_from = $3, reschedule_count = reschedule_count + 1,
+        student_reschedule_count = student_reschedule_count + $4 where id = $1`, [b.id, iso, b.scheduled_at, studentId ? 1 : 0]);
       await ops.cancelStaleReminders({ bookingId: b.id }, t);
       await ops.systemEvent(b.student_id, `Session “${b.service}” moved from ${ops.ist(b.scheduled_at)} to ${ops.ist(iso)}.`, t);
       await t.run("insert into anvaya.audit_log (user_id, action, detail) values ($1, 'booking_rescheduled', $2)", [byUserId, `booking:${b.id} from:${new Date(b.scheduled_at).toISOString()} to:${iso}`]);

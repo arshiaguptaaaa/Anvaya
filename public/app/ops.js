@@ -106,7 +106,7 @@
       selected.clear(); syncBulk();
       tbody.innerHTML = r.rows.map((x) => `<tr data-id="${x.id}"><td><input type="checkbox" data-sel="${x.id}" aria-label="Select ${esc(x.name)}"></td>
         <td class="strong"><a href="#" data-open="${x.id}">${esc(x.name)}</a><span class="sub-line">${esc(x.phone || x.email || '—')}${isLeads ? '' : x.college_name ? ` · ${esc(x.college_name)}` : ''}</span></td>
-        <td>${isLeads ? `${esc(x.source || '—')}<span class="sub-line">${statusPill(x.status)}</span>` : `${esc(x.track_name || '—')}<span class="sub-line">${x.plan_name ? `${esc(x.plan_name)} · until ${esc(d(x.plan_until))}` : 'No active plan'}</span>`}</td>
+        <td>${isLeads ? `${esc(x.source || '—')}${x.ref_source ? `<span class="sub-line">from ${esc(x.ref_source)}</span>` : ''}<span class="sub-line">${statusPill(x.status)}</span>` : `${esc(x.track_name || '—')}<span class="sub-line">${x.plan_name ? `${esc(x.plan_name)} · until ${esc(d(x.plan_until))}` : 'No active plan'}</span>`}</td>
         <td>${esc(x.next_action || '—')}<span class="sub-line">${due(x.follow_up_at)}${Number(x.open_tasks) ? ` · ${x.open_tasks} open task${x.open_tasks == 1 ? '' : 's'}` : ''}</span></td>
         <td>${esc(x.owner_name || '—')}</td><td class="actions"><button class="btn btn-ghost btn-sm" data-follow="${x.id}">Follow-up</button></td></tr>`).join('')
         || `<tr><td colspan="6"><div class="empty">No ${scope} match these filters.</div></td></tr>`;

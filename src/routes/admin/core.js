@@ -73,6 +73,14 @@ r.put('/settings', adminOnly, wrap(async (req, res) => {
       if (uid !== null && !await db.one("select 1 from anvaya.users where id = $1 and role in ('admin','ops') and disabled_at is null", [uid])) throw bad('Choose an active admin or ops user.');
       await settings.set(k, uid, req.auth.user.id); continue;
     }
+    if (k === 'page_confirmation_sender') {
+      if (!['apps_script', 'app'].includes(val)) throw bad('Choose who sends the payment-page confirmation: apps_script or app.');
+      await settings.set(k, val, req.auth.user.id); continue;
+    }
+    if (k === 'page_booking_links') {
+      if (!val || typeof val !== 'object' || Array.isArray(val) || !Object.values(val).every((u) => typeof u === 'string' && /^https:\/\/\S+$/.test(u))) throw bad('Booking links must be plan name → https link.');
+      await settings.set(k, val, req.auth.user.id); continue;
+    }
     if (k === 'renewal_reminder_days') {
       if (!Array.isArray(val) || !val.every((x) => Number.isInteger(x) && x >= 0 && x <= 60)) throw bad('Renewal reminder days must be a list of whole numbers.');
     } else if (!Number.isInteger(Number(val)) || Number(val) < 0) throw bad(`${k} must be a whole number.`);
@@ -139,6 +147,8 @@ r.get('/system', adminOnly, wrap(async (_req, res) => {
     mail: { mode: mailer.mailMode(), from: mailer.from(), domains, domainError },
     storage: { mode: storage.mode(), bucket: storage.BUCKET },
     payments: { configured: payments.configured(), webhookSecret: !!process.env.RAZORPAY_WEBHOOK_SECRET },
+    paymentSheet: { configured: !!(process.env.PAYMENT_SHEET_WEBHOOK_URL && process.env.PAYMENT_SHEET_TOKEN), notifyEmail: process.env.PAYMENT_NOTIFY_EMAIL || 'teamanvaya.in@gmail.com',
+      ...(await db.one("select count(*) filter (where sheet_status = 'synced') as synced, count(*) filter (where sheet_status <> 'synced') as waiting, max(sheet_error) filter (where sheet_status = 'failed') as last_error from anvaya.gateway_payments")) },
     sheet: { configured: !!process.env.GOOGLE_SHEET_WEBHOOK_URL, failed: await n("select count(*) n from anvaya.leads where sheet_sync_status = 'failed'"), pending: await n("select count(*) n from anvaya.leads where sheet_sync_status = 'pending'") },
     cron: { secret: !!process.env.CRON_SECRET },
     jobs: await db.all(`select kind, status, count(*) n, max(last_error) as last_error from anvaya.jobs

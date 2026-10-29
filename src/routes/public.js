@@ -8,6 +8,8 @@ const jobs = require('../lib/jobs');
 const { HttpError, bad, v, wrap } = require('../lib/http');
 
 const freechats = require('../lib/freechats');
+/** A visit-source code from the page (?src=… / utm_source): lower-case letters, digits, - _ . : / only. */
+const refCode = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9_.:/-]/g, '').slice(0, 60);
 const r = express.Router();
 const SHEET_URL = () => process.env.GOOGLE_SHEET_WEBHOOK_URL || '';
 const BASE_URL = () => (process.env.APP_BASE_URL || '').replace(/\/$/, '');
@@ -32,7 +34,7 @@ jobs.register('leads.sheet_sync', async ({ leadId }) => {
 const allowedOrigins = () => [BASE_URL(), ...(process.env.EXTRA_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean)];
 // The brochure may live on another origin (split setup: anvayacareers.in → app.anvayacareers.in), so this one
 // endpoint answers CORS for the configured origins only. No cookies are involved (credentials: 'omit').
-r.use(['/public/leads', '/public/checkout', '/public/checkout/verify', '/public/freechat/slots'], (req, res, next) => {
+r.use(['/public/leads', '/public/checkout', '/public/checkout/verify', '/public/freechat/slots', '/public/ref-visit'], (req, res, next) => {
   const origin = req.get('origin');
   if (origin && allowedOrigins().includes(origin)) res.set({ 'Access-Control-Allow-Origin': origin, Vary: 'Origin' });
   if (req.method !== 'OPTIONS') return next();
@@ -61,9 +63,9 @@ r.post('/public/leads', leadLimiter, wrap(async (req, res) => {
   const dup = await db.one("select id from anvaya.leads where phone = $1 and name = $2 and created_at > now() - interval '10 minutes'", [phone, name]);
   if (dup && !slot) return res.status(201).json({ ok: true, id: dup.id });
   const { lead, chat } = await db.tx(async (t) => {
-    const l = dup || await t.one(`insert into anvaya.leads (name, phone, email, situation, source, sheet_sync_status, follow_up_at, next_action)
-      values ($1,$2,$3,$4,'Free 15-min chat (website)',$5, now() + interval '4 hours', 'Call / WhatsApp to set up the free chat') returning id`,
-    [name, phone, email, situation, SHEET_URL() ? 'pending' : 'not_required']);
+    const l = dup || await t.one(`insert into anvaya.leads (name, phone, email, situation, source, sheet_sync_status, follow_up_at, next_action, ref_source, ref_first)
+      values ($1,$2,$3,$4,'Free 15-min chat (website)',$5, now() + interval '4 hours', 'Call / WhatsApp to set up the free chat', $6, $7) returning id`,
+    [name, phone, email, situation, SHEET_URL() ? 'pending' : 'not_required', refCode(b.src), refCode(b.src_first)]);
     if (!dup) {
       await t.run("insert into anvaya.lead_activities (lead_id, kind, body) values ($1,'system','Enquiry received from the website free-chat form')", [l.id]);
       if (SHEET_URL()) await jobs.enqueue('leads.sheet_sync', { leadId: l.id }, { q: t, dedupeKey: `sheet:${l.id}`, maxAttempts: 8 });
@@ -137,6 +139,44 @@ r.post('/public/checkout/verify', checkoutLimiter, wrap(async (req, res) => {
   if (!pay) return res.json({ ok: true, status: 'processing' }); // the webhook / reconciliation finishes it
   await payments.markPaid(order.id, { provider: 'razorpay', providerPaymentId: pay.id, amountPaise: pay.amount, feePaise: pay.fee || 0, taxPaise: pay.tax || 0, method: pay.method });
   res.json({ ok: true, status: 'paid' });
+}));
+
+// ── Visit-source link clicks: one count per code per day, no personal data ──
+const visitLimiter = sec.rateLimiter({ name: 'public-ref-visit', windowMs: 60 * 60e3, max: 60, key: (req) => req.ip });
+r.post('/public/ref-visit', visitLimiter, wrap(async (req, res) => {
+  const src = refCode(req.body?.src);
+  if (src) await db.run(`insert into anvaya.ref_visits (day, source, visits) values ((now() at time zone 'Asia/Kolkata')::date, $1, 1)
+    on conflict (day, source) do update set visits = ref_visits.visits + 1`, [src]);
+  res.status(204).end();
+}));
+
+// ── Payment-page checkout enquiries (details submitted + checkout opened, before any payment) ──
+const enquiries = require('../lib/enquiries');
+const enquiryLimiter = sec.rateLimiter({ name: 'public-enquiry', windowMs: 60 * 60e3, max: 40, key: (req) => req.ip });
+r.post('/public/checkout/enquiry', enquiryLimiter, wrap(async (req, res) => {
+  const b = req.body || {};
+  const key = v.str(b.plan_key, { max: 40 });
+  const product = key ? await db.one('select * from anvaya.products where public_key = $1 and active', [key])
+    : await db.one('select * from anvaya.products where name = $1 and public_key is not null and active', [v.str(b.plan, { max: 160 })]);
+  if (!product) throw bad('That plan isn’t available.');
+  const e = await enquiries.start({
+    name: v.str(b.name, { max: 120, required: true, label: 'Name' }), email: v.email(b.email).toLowerCase(), phone: v.str(b.phone, { max: 40 }),
+    product, refCode: v.str(b.ref_code, { max: 40 }).replace(/[^a-z0-9_-]/gi, ''), consent: b.consent === true, publicId: v.str(b.enquiry_id, { max: 40 }) || null,
+    refSource: refCode(b.src), refFirst: refCode(b.src_first), entry: refCode(b.entry),
+  });
+  res.status(201).json({ id: e.public_id });
+}));
+r.post('/public/checkout/enquiry/:id/event', enquiryLimiter, wrap(async (req, res) => {
+  const what = { closed: 'closed', browser_failed: 'browser_reported_failure' }[String(req.body?.event || '')];
+  if (!what) throw bad('Unknown event.');
+  await enquiries.event(String(req.params.id).slice(0, 40), what);
+  res.status(204).end();
+}));
+r.get('/public/checkout/enquiry/:id/stop', wrap(async (req, res) => {
+  const e = await enquiries.unsubscribe(String(req.params.id).slice(0, 40), String(req.query.t || ''));
+  res.status(e ? 200 : 404).type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anvaya</title>
+    <body style="margin:0;background:#08111f;color:#f4ede0;font-family:Helvetica,Arial,sans-serif;display:grid;place-items:center;min-height:100vh;text-align:center;padding:24px">
+    <div><div style="letter-spacing:.2em;color:#c9a84c">ANVAYA</div><p style="font-size:18px">${e ? 'Done. You won’t get any more checkout reminders from us.' : 'This link isn’t valid.'}</p></div></body>`);
 }));
 
 module.exports = r;

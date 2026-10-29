@@ -1,7 +1,7 @@
 'use strict';
 // Builds the static part of the split setup for Hostinger shared hosting (Single plan):
 //   hostinger-site/  →  zip it and upload to public_html.
-// Brochure + payment page are copied byte for byte; only the lead form's API address points at the app host.
+// Brochure + payment page and their scripts are copied byte for byte.
 const fs = require('node:fs');
 const path = require('node:path');
 const APP = (process.argv[2] || 'https://app.anvayacareers.in').replace(/\/$/, '');
@@ -11,9 +11,8 @@ fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(path.join(OUT, 'app'), { recursive: true });
 for (const f of ['index.html', 'anvaya-payment.html']) fs.copyFileSync(path.join(ROOT, 'public', f), path.join(OUT, f));
 fs.cpSync(path.join(ROOT, 'public', 'assets'), path.join(OUT, 'assets'), { recursive: true });
-const lead = fs.readFileSync(path.join(ROOT, 'public', 'app', 'lead-capture.js'), 'utf8');
-if (!lead.includes("fetch('/api/public/leads'")) throw new Error('lead-capture.js changed; update this script.');
-fs.writeFileSync(path.join(OUT, 'app', 'lead-capture.js'), lead.replace("fetch('/api/public/leads'", `fetch('${APP}/api/public/leads'`));
+// The public pages' scripts pick the app host themselves when served from anvayacareers.in.
+for (const f of ['lead-capture.js', 'site.js', 'site.css', 'src-track.js']) fs.copyFileSync(path.join(ROOT, 'public', 'app', f), path.join(OUT, 'app', f));
 fs.writeFileSync(path.join(OUT, '.htaccess'), `# Anvaya static site (Hostinger). The dashboards and APIs live on ${APP}.
 Options -Indexes
 RewriteEngine On

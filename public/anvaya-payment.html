@@ -6,6 +6,7 @@
 <title>Book Your Session — Anvaya</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="app/src-track.js" defer></script>
 <style>
 :root {
   --navy: #08111f;
@@ -406,6 +407,8 @@ nav{
 .ref-banner-amount{font-family:'Cormorant Garamond',serif;font-size:1.4rem;color:var(--gold-2);flex-shrink:0;}
 .summary-row.discount .v{color:#5dbd8a;font-weight:500;}
 @keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.field-consent{display:flex;gap:10px;align-items:flex-start;margin:-4px 0 18px;font-size:12px;line-height:1.55;color:var(--muted,#9a8d78);cursor:pointer;}
+.field-consent input{margin:2px 0 0;accent-color:var(--gold);flex-shrink:0;}
 </style>
 </head>
 <body>
@@ -541,6 +544,8 @@ nav{
         <div class="field-err" id="err-phone">Enter your phone number</div>
       </div>
 
+      <label class="field-consent"><input type="checkbox" id="followup"> Email me a reminder if I don’t finish checking out (2 emails at most, stop anytime).</label>
+
       <!-- REFERRAL DISCOUNT BANNER -->
       <div class="ref-banner" id="refBanner">
         <div class="ref-banner-icon">🎁</div>
@@ -565,7 +570,7 @@ nav{
       </button>
 
       <div class="pay-note">
-        Payments processed securely via <a href="https://razorpay.com" target="_blank">Razorpay</a>. Your details are never shared.
+        Payments processed securely via <a href="https://razorpay.com" target="_blank">Razorpay</a>. Your details are never shared. <a href="/refund-policy.html" target="_blank">Refund &amp; rescheduling policy</a>.
       </div>
     </div>
 
@@ -586,7 +591,7 @@ nav{
 </div>
 
 <script>
-const RAZORPAY_KEY = "rzp_live_Se0eGSOi0lXH9B"; // ← paste your rzp_live_... public key here
+const RAZORPAY_KEY = "rzp_live_TrQ1hO3vq0t9uU"; // ← paste your rzp_live_... public key here
 const SCRIPT_URL   = "https://script.google.com/macros/s/AKfycbxmOTcxIirra9oulQI3Jo65xr9eJP0AjBZpOeGwyCRH2nkr8FlZ9fkjOD1e__at9Uw/exec";
 
 // ── REFERRAL CODE from URL ──────────────────────────────────────
@@ -706,12 +711,31 @@ function setLoading(on) {
   document.getElementById('btnText').style.display = on ? 'none' : 'inline';
 }
 
-function initiatePayment() {
+// Checkout enquiry: saved in Anvaya once details are submitted, before payment. Never blocks or delays payment by more than 2.5 s.
+const ANVAYA_API = /^app\./.test(location.hostname) || location.hostname === 'localhost' ? '' : 'https://app.anvayacareers.in';
+let ENQUIRY_ID = '';
+async function startEnquiry(name, email, phone) {
+  try {
+    const key = Object.keys(PLAN_MAP).find(k => (document.querySelectorAll('.plan')[PLAN_MAP[k]] || {}).dataset?.name === plan.name) || '';
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 2500);
+    const res = await fetch(ANVAYA_API + '/api/public/checkout/enquiry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', signal: ctl.signal,
+      body: JSON.stringify({ name, email, phone, plan_key: key, plan: plan.name, ref_code: REF_CODE, consent: !!document.getElementById('followup')?.checked, enquiry_id: ENQUIRY_ID, entry: urlParams.get('via') || '', ...(window.AnvayaSrc ? window.AnvayaSrc.get() : {}) }) });
+    clearTimeout(t);
+    const j = await res.json(); if (j.id) ENQUIRY_ID = j.id;
+  } catch (e) { /* payment goes ahead regardless */ }
+}
+function noteEnquiry(event) {
+  if (!ENQUIRY_ID) return;
+  try { fetch(ANVAYA_API + '/api/public/checkout/enquiry/' + ENQUIRY_ID + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', keepalive: true, body: JSON.stringify({ event }) }).catch(() => {}); } catch (e) {}
+}
+
+async function initiatePayment() {
   if (!validate()) return;
   const name  = `${document.getElementById('fname').value.trim()} ${document.getElementById('lname').value.trim()}`;
   const email = document.getElementById('email').value.trim();
   const phone = document.getElementById('phone').value.trim();
   setLoading(true);
+  await startEnquiry(name, email, phone);
 
   const finalPaise = plan.finalAmount || plan.amount;
   const rzp = new Razorpay({
@@ -722,18 +746,18 @@ function initiatePayment() {
     name: "Anvaya — Where Purpose Meets Path",
     description: plan.name,
     prefill: { name, email, contact: phone },
-    notes: { plan: plan.name, sessions: plan.sessions },
+    notes: { plan: plan.name, sessions: plan.sessions, enquiry: ENQUIRY_ID },
     theme: { color: "#c9a84c" },
     modal: { ondismiss: () => {
       setLoading(false);
-      // Track abandoned checkout — user opened Razorpay but closed without paying
-      logAbandoned(name, email, phone);
+      // Closing checkout is recorded as an event, never as a failed payment (Anvaya marks it abandoned after 30 min)
+      noteEnquiry('closed');
     }},
     handler: r => onSuccess(r, { name, email, phone })
   });
   rzp.on('payment.failed', e => {
     setLoading(false);
-    logAbandoned(name, email, phone);
+    noteEnquiry('browser_failed'); // the verified failure comes from Razorpay's own notification
     alert('Payment failed: ' + e.error.description);
   });
   rzp.open();

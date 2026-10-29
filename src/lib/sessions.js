@@ -215,7 +215,7 @@ async function afterReschedule(bookingId) {
 
 /** Cancels a booking (student or staff), releasing the slot, the calendar event and stale reminders, and notifies both. */
 async function cancel(bookingId, { by, reason = '', asStudentId = null }) {
-  const cutoff = Number(await settings.get('reschedule_cutoff_hours')) || 2;
+  const cutoff = Number(await settings.get('reschedule_cutoff_hours')) || 24;
   const b = await db.tx(async (t) => {
     const x = await t.one('select * from anvaya.bookings where id = $1 for update', [bookingId]);
     if (!x || (asStudentId && x.student_id !== asStudentId)) throw new HttpError(404, 'Booking not found.');
