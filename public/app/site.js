@@ -112,11 +112,11 @@
     var plansWrap = document.querySelector('#plans .plans-wrap');
     if (plansWrap) {
       var PLANS = {
-        '500mba': { name: 'MBA Planning & Strategy Call', price: '₹500 · 1 × 30 min', why: 'A focused call to map your MBA plan: target schools, how your profile reads today, and what to fix before you apply.' },
-        '1500': { name: 'Portfolio Roadmap & Diagnosis', price: '₹1,500 · 1 × 60 min', why: 'An honest read of your profile and a clear roadmap: which roles fit you, what is missing, and the order to fix it in.' },
-        '2250': { name: 'Complete Resume Build & Rewrite', price: '₹2,250 · 3 × 45 min', why: 'Your CV rebuilt line by line with you, so it gets shortlisted for the roles you are applying to now.' },
+        '500mba': { name: 'MBA Planning & Strategy Call', price: '₹499 · 1 × 30 min', why: 'A focused call to map your MBA plan: target schools, how your profile reads today, and what to fix before you apply.' },
+        '1500': { name: 'Portfolio Roadmap & Diagnosis', price: '₹1,499 · 1 × 60 min', why: 'An honest read of your profile and a clear roadmap: which roles fit you, what is missing, and the order to fix it in.' },
+        '2250': { name: 'Complete Resume Build & Rewrite', price: '₹2,249 · 3 × 45 min', why: 'Your CV rebuilt line by line with you, so it gets shortlisted for the roles you are applying to now.' },
         '3999': { name: 'The Full Picture — Profile Strategy + Resume', price: '₹3,999 · 3 × 60 min + 30 min bonus', why: 'Direction first, then the CV to match: strategy, positioning and a rewritten resume in one programme.' },
-        '4500': { name: 'Guesstimate Readiness Programme', price: '₹4,500 · 5 × 60 min', why: 'Five live sessions of guesstimates and case practice with feedback, built for consulting interviews.' },
+        '4500': { name: 'Guesstimate Readiness Programme', price: '₹4,499 · 5 × 60 min', why: 'Five live sessions of guesstimates and case practice with feedback, built for consulting interviews.' },
       };
       var Q = [
         { k: 'stage', q: 'Where are you right now?', o: [['college', 'In college (UG or PG)'], ['working', 'Working'], ['mba', 'Planning an MBA']] },
