@@ -115,6 +115,7 @@ const LEAD_TAG = '<script src="/app/lead-capture.js" defer></script>\n';
 const BROCHURE_IMAGES = require('./fixtures/brochure-images.json');
 // Content edits approved by the owner, applied on top of the supplied brochure: [now, originally].
 const APPROVED_EDITS = [
+  ["<link rel=\"icon\" href=\"/favicon-32.png\" type=\"image/png\" sizes=\"32x32\">\n<link rel=\"icon\" href=\"/favicon.ico\" sizes=\"48x48\">\n<link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\">\n", ''], // browser-tab icon: tree logo (3 Nov 2026)
   ["<img src=\"/assets/anvaya-mark.webp\" decoding=\"async\" alt=\"Anvaya\" class=\"nav-logo\">", `<img src="${BROCHURE_IMAGES['/assets/site/anvaya-d6e77cea.webp']}" alt="Anvaya" class="nav-logo">`], // logo: tree emblem instead of the blue square icon (2 Nov 2026)
   ["<img src=\"/assets/anvaya-mark.webp\" loading=\"lazy\" decoding=\"async\" alt=\"Anvaya\">", `<img src="${BROCHURE_IMAGES['/assets/site/anvaya-d6e77cea.webp']}" alt="Anvaya">`], // logo: tree emblem instead of the blue square icon (2 Nov 2026)
   ["<div class=\"plan-price\">&#8377;2,249</div>", "<div class=\"plan-price\">&#8377;2,250</div>"], // charm pricing (2 Nov 2026)
